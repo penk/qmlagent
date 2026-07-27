@@ -540,6 +540,16 @@ static bool selectorArrayContainsTypeValue(const QJsonArray &selectors, const QS
     return false;
 }
 
+static QString selectorValueForKind(const QJsonArray &selectors, const QString &kind)
+{
+    for (const QJsonValue &selectorValue : selectors) {
+        const QJsonObject selector = selectorValue.toObject();
+        if (selector.value(QStringLiteral("kind")).toString() == kind)
+            return selector.value(QStringLiteral("value")).toString();
+    }
+    return {};
+}
+
 static bool issueIdsContain(const QJsonArray &issues, const QString &id)
 {
     for (const QJsonValue &issueValue : issues) {
@@ -788,6 +798,66 @@ Window {
             .at(0).toObject().value(QStringLiteral("properties")).toObject()
             .value(QStringLiteral("model")).toObject();
     QCOMPARE(repeaterModelRef.value(QStringLiteral("qmlId")).toString(), QStringLiteral("frameModel"));
+
+    const QJsonObject allModelsQuery = QQmlAgentUiTree::query({
+        { QStringLiteral("selector"), QStringLiteral("type=\"Model\"") },
+        { QStringLiteral("includeInvisible"), true },
+        { QStringLiteral("includeSource"), true },
+        { QStringLiteral("maxMatches"), 20 },
+        { QStringLiteral("fields"), QJsonArray{
+            QStringLiteral("type"),
+            QStringLiteral("delegate"),
+            QStringLiteral("selectors"),
+            QStringLiteral("sourceLocation"),
+        } },
+    });
+    const QJsonArray allModelMatches = allModelsQuery.value(QStringLiteral("matches")).toArray();
+    QJsonObject firstRepeaterDelegate;
+    for (const QJsonValue &matchValue : allModelMatches) {
+        const QJsonObject match = matchValue.toObject();
+        const QJsonObject delegate = match.value(QStringLiteral("delegate")).toObject();
+        if (delegate.value(QStringLiteral("indexSource")).toString()
+                == QLatin1String("repeater3DObjectAt")
+                && delegate.value(QStringLiteral("index")).toInt(-1) == 0) {
+            firstRepeaterDelegate = match;
+            break;
+        }
+    }
+    QVERIFY2(!firstRepeaterDelegate.isEmpty(),
+             qPrintable(QJsonDocument(allModelsQuery).toJson(QJsonDocument::Compact)));
+    QCOMPARE(firstRepeaterDelegate.value(QStringLiteral("delegate")).toObject()
+                     .value(QStringLiteral("isDelegate")).toBool(),
+             true);
+    QCOMPARE(firstRepeaterDelegate.value(QStringLiteral("sourceLocation")).toObject()
+                     .value(QStringLiteral("method")).toString(),
+             QStringLiteral("qqmldata-delegate"));
+    const QString indexedDelegateSelector = selectorValueForKind(
+            firstRepeaterDelegate.value(QStringLiteral("selectors")).toArray(),
+            QStringLiteral("sourceLocation+index"));
+    QVERIFY2(!indexedDelegateSelector.isEmpty(),
+             qPrintable(QJsonDocument(firstRepeaterDelegate).toJson(QJsonDocument::Compact)));
+
+    const QJsonObject indexedDelegateQuery = QQmlAgentUiTree::query({
+        { QStringLiteral("selector"), indexedDelegateSelector },
+        { QStringLiteral("includeInvisible"), true },
+        { QStringLiteral("includeSource"), true },
+        { QStringLiteral("fields"), QJsonArray{
+            QStringLiteral("delegate"),
+            QStringLiteral("sourceLocation"),
+            QStringLiteral("selectors"),
+        } },
+    });
+    const QJsonArray indexedDelegateMatches =
+            indexedDelegateQuery.value(QStringLiteral("matches")).toArray();
+    QCOMPARE(indexedDelegateMatches.size(), 1);
+    QCOMPARE(indexedDelegateMatches.at(0).toObject()
+                     .value(QStringLiteral("delegate")).toObject()
+                     .value(QStringLiteral("index")).toInt(-1),
+             0);
+    QCOMPARE(indexedDelegateMatches.at(0).toObject()
+                     .value(QStringLiteral("delegate")).toObject()
+                     .value(QStringLiteral("indexSource")).toString(),
+             QStringLiteral("repeater3DObjectAt"));
 
     const QJsonObject binding = QQmlAgentDiagnostics::analyzeBinding({
         { QStringLiteral("selector"), QStringLiteral("id=\"cube\"") },

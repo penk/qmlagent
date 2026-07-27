@@ -643,6 +643,8 @@ static QJsonObject quick3DRenderEvidence(QObject *object)
     return evidence;
 }
 
+static int quick3DRepeaterIndexForObject(QObject *repeater, QObject *object);
+
 // QML ids are only unique per component scope and objectName is not enforced
 // at all, so a "high" stability claim must be backed by uniqueness in the
 // current tree. Counted over invisible nodes too, because node resolution for
@@ -743,8 +745,13 @@ static SelectorUniquenessIndex buildSelectorUniquenessIndex()
             }
             if (quick3DTraversalAvailable()) {
                 const QList<QObject *> children = quick3DTraversalChildren(object);
-                for (QObject *child : children)
-                    stack.append({ child, context });
+                for (QObject *child : children) {
+                    DelegateContext childContext = context;
+                    const int repeaterIndex = quick3DRepeaterIndexForObject(object, child);
+                    if (repeaterIndex >= 0)
+                        childContext = { -1, -1, repeaterIndex };
+                    stack.append({ child, childContext });
+                }
             }
         }
     }
@@ -964,6 +971,39 @@ static int readableDelegateColumn(QObject *object)
     return readableIntegerValue(object, QStringLiteral("column"));
 }
 
+static int quick3DRepeaterIndexForObject(QObject *repeater, QObject *object)
+{
+    if (!repeater || !object)
+        return -1;
+
+    const int countIndex = repeater->metaObject()->indexOfProperty("count");
+    const int objectAtIndex = repeater->metaObject()->indexOfMethod("objectAt(int)");
+    if (countIndex < 0 || objectAtIndex < 0)
+        return -1;
+
+    bool ok = false;
+    const int count = repeater->property("count").toInt(&ok);
+    if (!ok || count <= 0)
+        return -1;
+
+    const QMetaMethod objectAt = repeater->metaObject()->method(objectAtIndex);
+    const QByteArray returnType = objectAt.typeName();
+    if (returnType.isEmpty())
+        return -1;
+
+    for (int i = 0; i < count; ++i) {
+        QObject *candidate = nullptr;
+        const bool invoked = objectAt.invoke(
+                repeater, Qt::DirectConnection,
+                QGenericReturnArgument(returnType.constData(), &candidate),
+                QGenericArgument("int", &i));
+        if (invoked && candidate == object)
+            return i;
+    }
+
+    return -1;
+}
+
 static bool isVirtualizedViewType(const QString &typeName)
 {
     return typeName.contains(QLatin1String("ListView"))
@@ -1001,7 +1041,8 @@ static bool hasTableLikeViewAncestor(QObject *object)
 
 static bool delegateIndexSourceSupportsSelector(const QString &indexSource)
 {
-    return indexSource == QLatin1String("modelIndex");
+    return indexSource == QLatin1String("modelIndex")
+            || indexSource == QLatin1String("repeater3DObjectAt");
 }
 
 static bool delegateCellSourceSupportsSelector(const QString &cellSource)
@@ -1232,6 +1273,7 @@ static QJsonObject applyDelegateCellContext(QJsonObject node, int row, int colum
 }
 
 static QJsonObject withDelegateMetadata(QJsonObject node, QObject *object, int delegateIndex,
+                                        const QString &fallbackIndexSource,
                                         const SelectorUniquenessIndex &uniqueness)
 {
     QJsonObject source = node.value(QStringLiteral("sourceLocation")).toObject();
@@ -1254,11 +1296,20 @@ static QJsonObject withDelegateMetadata(QJsonObject node, QObject *object, int d
     if (!sourceLooksLikeDelegate)
         return node;
 
+    if (!fallbackIndexSource.isEmpty())
+        return applyDelegateContext(node, delegateIndex, fallbackIndexSource, uniqueness);
+
     if (!hasVirtualizedViewAncestor(object)) {
         return applyDelegateContext(node, delegateIndex, QStringLiteral("creationOrder"),
                                     uniqueness);
     }
     return applyDelegateContext(node, delegateIndex, QStringLiteral("visualOrder"), uniqueness);
+}
+
+static QJsonObject withDelegateMetadata(QJsonObject node, QObject *object, int delegateIndex,
+                                        const SelectorUniquenessIndex &uniqueness)
+{
+    return withDelegateMetadata(node, object, delegateIndex, {}, uniqueness);
 }
 
 static QJsonArray collapseRepeatedChildren(const QJsonArray &children)
@@ -1527,11 +1578,22 @@ static QJsonObject nodeForObjectInternal(QObject *object, int windowId, int dept
                         .arg(nodeVisualPath, childTypeName)
                         .arg(childIndex);
                 ++childIndex;
-                const QJsonObject childNode =
+                QJsonObject childNode =
                         nodeForObjectInternal(child, windowId, childDepth, options, seen, state,
                                               childVisualPath);
-                if (!childNode.isEmpty())
+                if (!childNode.isEmpty()) {
+                    const QString repeatKey = repeatedNodeKey(childNode);
+                    const int creationIndex = delegateIndexes.value(repeatKey, 0);
+                    delegateIndexes.insert(repeatKey, creationIndex + 1);
+                    const int repeaterIndex = quick3DRepeaterIndexForObject(object, child);
+                    childNode = repeaterIndex >= 0
+                            ? withDelegateMetadata(childNode, child, repeaterIndex,
+                                                   QStringLiteral("repeater3DObjectAt"),
+                                                   options.uniqueness)
+                            : withDelegateMetadata(childNode, child, creationIndex,
+                                                   options.uniqueness);
                     children.append(childNode);
+                }
             }
         }
         if (options.collapseRepeated)
@@ -1939,6 +2001,7 @@ static void collectQueryMatchesFromObject(QObject *object, int windowId, const S
                                           int resultDepth, int maxMatches, bool *truncated,
                                           QJsonArray *matches, QSet<QObject *> *seen,
                                           const QString &visualPath, int delegateIndex = -1,
+                                          const QString &delegateIndexSource = {},
                                           int inheritedDelegateIndex = -1,
                                           const QString &inheritedDelegateIndexSource = {},
                                           int inheritedDelegateRow = -1,
@@ -1970,7 +2033,7 @@ static void collectQueryMatchesFromObject(QObject *object, int windowId, const S
                                          inheritedDelegateIndexSource,
                                          matchOptions.uniqueness);
     else if (delegateIndex >= 0)
-        matchNode = withDelegateMetadata(matchNode, object, delegateIndex,
+        matchNode = withDelegateMetadata(matchNode, object, delegateIndex, delegateIndexSource,
                                          matchOptions.uniqueness);
     const QJsonObject effectiveDelegate = matchNode.value(QStringLiteral("delegate")).toObject();
     const int effectiveDelegateIndex =
@@ -2005,6 +2068,7 @@ static void collectQueryMatchesFromObject(QObject *object, int windowId, const S
                                                   resultOptions.uniqueness);
             else if (delegateIndex >= 0)
                 resultNode = withDelegateMetadata(resultNode, object, delegateIndex,
+                                                  delegateIndexSource,
                                                   resultOptions.uniqueness);
             matches->append(resultNode);
         }
@@ -2031,7 +2095,8 @@ static void collectQueryMatchesFromObject(QObject *object, int windowId, const S
 
             collectQueryMatchesFromObject(child, windowId, criteria, matchOptions, resultOptions,
                                           resultDepth, maxMatches, truncated, matches, seen,
-                                          childVisualPath, childDelegateIndex, effectiveDelegateIndex,
+                                          childVisualPath, childDelegateIndex, {},
+                                          effectiveDelegateIndex,
                                           effectiveDelegateIndexSource, effectiveDelegateRow,
                                           effectiveDelegateColumn, effectiveDelegateCellSource);
         }
@@ -2045,9 +2110,21 @@ static void collectQueryMatchesFromObject(QObject *object, int windowId, const S
                     .arg(childIndex);
             ++childIndex;
 
+            QJsonObject childMatchNode = nodeForObjectInternal(child, windowId, 0, matchOptions,
+                                                               nullptr, nullptr, childVisualPath);
+            const QString repeatKey = repeatedNodeKey(childMatchNode);
+            const int childCreationIndex = delegateIndexes.value(repeatKey, 0);
+            delegateIndexes.insert(repeatKey, childCreationIndex + 1);
+            const int repeaterIndex = quick3DRepeaterIndexForObject(object, child);
+            const int childDelegateIndex =
+                    repeaterIndex >= 0 ? repeaterIndex : childCreationIndex;
+            const QString childDelegateIndexSource = repeaterIndex >= 0
+                    ? QStringLiteral("repeater3DObjectAt") : QString();
+
             collectQueryMatchesFromObject(child, windowId, criteria, matchOptions, resultOptions,
                                           resultDepth, maxMatches, truncated, matches, seen,
-                                          childVisualPath, -1, effectiveDelegateIndex,
+                                          childVisualPath, childDelegateIndex,
+                                          childDelegateIndexSource, effectiveDelegateIndex,
                                           effectiveDelegateIndexSource, effectiveDelegateRow,
                                           effectiveDelegateColumn, effectiveDelegateCellSource);
         }

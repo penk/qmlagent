@@ -135,6 +135,9 @@ projected screen bounds, camera distance, and approximate frustum evidence.
 Use `qmlagent_diagnostics_analyze_tree` or `qmlagent_diagnostics_analyze_node`
 with `checks:["quick3D"]` to focus on View3D camera/light setup, Model
 material/scale, texture source, and render3D-backed frustum evidence.
+Repeater3D delegate nodes may carry `delegate.indexSource:"repeater3DObjectAt"`;
+use the advertised `sourceLocation="..." index=N` selector for anonymous
+repeated 3D delegates instead of visual order or session-local node ids.
 Use `qmlagent_render_pick3d` or `Render.pick3D` on a `View3D` selector for
 read-only hit-test evidence at a View3D-local coordinate; it does not deliver
 input events.
