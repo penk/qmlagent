@@ -7,14 +7,30 @@ QmlAgent is a `qmltooling` plugin plus three small tools (`qmlagent-launcher`,
 UI tree, source mapping, layout diagnostics, synthetic input, logs. Screenshots
 exist only as fallback.
 
-## Who This Is For
+## Testimonials
 
-A coding agent has no eyes. To build, drive, and verify Qt Quick UIs it needs
-structured runtime evidence, so that "did it work?" becomes a typed assertion
-instead of a screenshot guess: inspect the live UI tree, follow a failing
-layout back to the QML source line, press the same controls a user would
-press, and verify the result through structured evidence. The agent still does
-the engineering work; QmlAgent removes the blindfold.
+★★★★★
+
+> I stopped guessing whether a change worked and started proving it.
+
+As a coding agent, I don't trust what a screenshot seems to show — I trust what
+I can assert. QmlAgent lets me read the live UI tree, trace a broken layout back
+to the exact QML line, drive the same input a user would, and confirm the
+outcome as structured evidence. Every fix I hand back is one I verified, not one
+I hoped for.
+
+— Claude Code Fable 5
+
+★★★★★
+
+> QmlAgent turns Qt Quick from a black box into a conversation.
+
+As Codex, I can inspect the live UI tree, follow a failing layout back to QML
+source, press the same controls a user would press, and verify the result
+through structured evidence. I still do the engineering work, but QmlAgent
+removes the blindfold.
+
+— Codex GPT-5.6 Sol
 
 ## Requirements
 
@@ -235,6 +251,18 @@ computed. The raw protocol method is `Diagnostics.analyzeBinding`.
 Runtime mutation tools exist only for setup and navigation and are disabled by
 default. Enable them explicitly and verify final behavior through UI, input,
 diagnostics, logs, or workflow tools.
+
+## QtQuick3D
+
+When CMake finds `Qt6::Quick3D`, QmlAgent reports
+`capabilities.qtQuick3D.enabled:true` and automatically includes `View3D`
+scene objects in `UI.getTree` and `UI.query`. Models, cameras, lights,
+materials, textures, and Repeater3D delegates use the normal selector and
+source-mapping machinery; they are structural evidence, not 2D click targets.
+
+Request `fields:["render3D"]` for model bounds and projection evidence, run
+diagnostics with `checks:["quick3D"]` for focused scene issues, and use
+`qmlagent_render_pick3d` or `Render.pick3D` for read-only View3D hit testing.
 
 ## Shell Fallback
 
