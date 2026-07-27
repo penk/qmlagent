@@ -259,6 +259,9 @@ void tst_QQmlAgentProtocol::mcpToolSchemasExposeAgentFirstContracts()
     QVERIFY2(getTree.value(QStringLiteral("description")).toString()
                     .contains(QStringLiteral("not QQuickItem click targets")),
              qPrintable(QJsonDocument(getTree).toJson(QJsonDocument::Compact)));
+    QVERIFY2(getTree.value(QStringLiteral("description")).toString()
+                    .contains(QStringLiteral("render3D")),
+             qPrintable(QJsonDocument(getTree).toJson(QJsonDocument::Compact)));
     const QJsonObject query = mcpToolByName(QStringLiteral("qmlagent_ui_query"));
     QVERIFY(!query.isEmpty());
     QVERIFY(!query.value(QStringLiteral("inputSchema")).toObject()
@@ -266,6 +269,9 @@ void tst_QQmlAgentProtocol::mcpToolSchemasExposeAgentFirstContracts()
                     .contains(oldQuick3DFlag));
     QVERIFY2(query.value(QStringLiteral("description")).toString()
                     .contains(QStringLiteral("QtQuick3D")),
+             qPrintable(QJsonDocument(query).toJson(QJsonDocument::Compact)));
+    QVERIFY2(query.value(QStringLiteral("description")).toString()
+                    .contains(QStringLiteral("projected screen bounds")),
              qPrintable(QJsonDocument(query).toJson(QJsonDocument::Compact)));
 
     const QJsonObject scrollIntoView =

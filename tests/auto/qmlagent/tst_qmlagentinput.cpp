@@ -638,6 +638,7 @@ Window {
             QStringLiteral("sourceLocation"),
             QStringLiteral("selectors"),
             QStringLiteral("properties"),
+            QStringLiteral("render3D"),
         } },
         { QStringLiteral("properties"), QJsonArray{
             QStringLiteral("source"),
@@ -660,6 +661,24 @@ Window {
     QCOMPARE(model.value(QStringLiteral("qmlId")).toString(), QStringLiteral("cube"));
     QCOMPARE(model.value(QStringLiteral("objectName")).toString(),
              QStringLiteral("quick3d.probe.cube"));
+    const QJsonObject render3D = model.value(QStringLiteral("render3D")).toObject();
+    QVERIFY2(!render3D.value(QStringLiteral("available")).toBool(),
+             qPrintable(QJsonDocument(render3D).toJson(QJsonDocument::Compact)));
+    QCOMPARE(render3D.value(QStringLiteral("reason")).toString(),
+             QStringLiteral("model_bounds_unavailable"));
+    QVERIFY2(!render3D.contains(QStringLiteral("worldBounds")),
+             qPrintable(QJsonDocument(render3D).toJson(QJsonDocument::Compact)));
+    QVERIFY2(!render3D.value(QStringLiteral("projection")).toObject()
+                    .value(QStringLiteral("available")).toBool(),
+             qPrintable(QJsonDocument(render3D).toJson(QJsonDocument::Compact)));
+    QCOMPARE(render3D.value(QStringLiteral("projection")).toObject()
+                     .value(QStringLiteral("reason")).toString(),
+             QStringLiteral("model_bounds_unavailable"));
+    QVERIFY2(!render3D.contains(QStringLiteral("inFrustum")),
+             qPrintable(QJsonDocument(render3D).toJson(QJsonDocument::Compact)));
+    QCOMPARE(render3D.value(QStringLiteral("distanceFromCamera")).toObject()
+                     .value(QStringLiteral("reason")).toString(),
+             QStringLiteral("model_bounds_unavailable"));
     QCOMPARE(model.value(QStringLiteral("properties")).toObject()
                      .value(QStringLiteral("source")).toString(),
              QStringLiteral("#Cube"));

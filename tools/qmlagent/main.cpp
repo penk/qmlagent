@@ -965,6 +965,7 @@ static void printCallHelp()
     printProtocolMethods(stream);
     stream << "\nExamples:\n"
            << "  qmlagentctl call UI.query --params '{\"selector\":\"id=\\\"saveButton\\\"\"}'\n"
+           << "  qmlagentctl call UI.query --params '{\"selector\":\"objectName=\\\"probe.cube\\\"\",\"fields\":[\"render3D\"]}'\n"
            << "  qmlagentctl call UI.queryMany --params '{\"queries\":[{\"selector\":\"id=\\\"saveButton\\\"\"},{\"selector\":\"id=\\\"statusLabel\\\"\",\"properties\":[\"text\"]}]}'\n"
            << "  qmlagentctl call Input.scrollIntoView --params '{\"selector\":\"id=\\\"saveButton\\\"\"}'\n"
            << "  qmlagentctl call UI.waitFor --params '{\"selector\":\"id=\\\"popup\\\"\",\"until\":{\"state\":\"found\"}}'\n"
@@ -990,10 +991,11 @@ static void printMethodsHelp(const QStringList &methods, const QString &origin,
            << "  UI.queryMany             batch several selector/property reads\n"
            << "  Input.scrollIntoView     recover from center_outside_viewport on clipped content\n"
            << "  UI.getTree / UI.query    include QtQuick3D View3D scene nodes automatically when capabilities.qtQuick3D.enabled is true\n"
+           << "  UI.query fields=render3D  Quick3D model world bounds, projected screen bounds, distance, and frustum evidence\n"
            << "\nMCP/tool equivalents:\n"
            << "  qmlagent_ui_query_many\n"
            << "  qmlagent_input_scroll_into_view\n"
-           << "  qmlagent_ui_get_tree / qmlagent_ui_query for QtQuick3D structural/source evidence\n";
+           << "  qmlagent_ui_get_tree / qmlagent_ui_query for QtQuick3D structural/source evidence; request fields=[\"render3D\"] for model projection evidence\n";
 }
 
 static int runCtlSubcommand(const QStringList &arguments)
@@ -1023,7 +1025,9 @@ static int runCtlSubcommand(const QStringList &arguments)
                 << "  qmlagentctl call <Method.Name> --params '{...}'\n\n"
                 << "QtQuick3D: when capabilities.qtQuick3D.enabled is true, UI.getTree and\n"
                 << "UI.query include View3D scene frontend nodes automatically. These nodes\n"
-                << "are structural/source evidence, not QQuickItem click targets.\n\n"
+                << "are structural/source evidence, not QQuickItem click targets. Request\n"
+                << "fields=[\"render3D\"] on Model nodes for world bounds, projected screen\n"
+                << "bounds, camera distance, and approximate frustum evidence.\n\n"
                 << "Screenshot is fallback visual evidence. Use structural UI,\n"
                 << "diagnostics, source, log, and input/workflow evidence first;\n"
                 << "--include-data is opt-in to preserve agent context.\n"

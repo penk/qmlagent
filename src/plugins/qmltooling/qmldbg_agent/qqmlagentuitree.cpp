@@ -20,6 +20,8 @@
 #include <QtCore/qvariant.h>
 #include <QtCore/qvector.h>
 #include <QtGui/qguiapplication.h>
+#include <QtGui/qmatrix4x4.h>
+#include <QtGui/qvector3d.h>
 #include <QtGui/qwindow.h>
 #include <QtQml/qqmlcontext.h>
 #include <QtQml/qqmlproperty.h>
@@ -34,6 +36,8 @@
 #include <private/qqmlcontextdata_p.h>
 #include <private/qqmldata_p.h>
 #include <private/qqmlmetatype_p.h>
+
+#include <limits>
 
 QT_BEGIN_NAMESPACE
 
@@ -343,6 +347,300 @@ static bool quick3DObjectVisible(QObject *object)
     if (visibleIndex < 0)
         return true;
     return object->property("visible").toBool();
+}
+
+static bool isQuick3DModelObject(QObject *object)
+{
+    return object && object->inherits("QQuick3DModel");
+}
+
+static QJsonObject vector3DObject(const QVector3D &vector)
+{
+    return {
+        { QStringLiteral("x"), vector.x() },
+        { QStringLiteral("y"), vector.y() },
+        { QStringLiteral("z"), vector.z() },
+    };
+}
+
+static bool quick3DSubtreeContains(QObject *root, QObject *needle, QSet<QObject *> *seen)
+{
+    if (!root || !needle || seen->contains(root))
+        return false;
+    if (root == needle)
+        return true;
+    seen->insert(root);
+    const QList<QObject *> children = quick3DTraversalChildren(root);
+    for (QObject *child : children) {
+        if (quick3DSubtreeContains(child, needle, seen))
+            return true;
+    }
+    return false;
+}
+
+static QObject *quick3DViewportForObject(QObject *object)
+{
+    for (QObject *parent = object; parent; parent = parent->parent()) {
+        if (isQuick3DViewportObject(parent))
+            return parent;
+    }
+
+    const QWindowList windows = QGuiApplication::allWindows();
+    for (QWindow *window : windows) {
+        QQuickWindow *quickWindow = qobject_cast<QQuickWindow *>(window);
+        if (!quickWindow || !quickWindow->contentItem())
+            continue;
+        QVector<QObject *> stack{ quickWindow->contentItem() };
+        QSet<QObject *> seenItems;
+        while (!stack.isEmpty()) {
+            QObject *current = stack.takeLast();
+            if (!current || seenItems.contains(current))
+                continue;
+            seenItems.insert(current);
+            if (isQuick3DViewportObject(current)) {
+                QSet<QObject *> seen3D;
+                if (quick3DSubtreeContains(current, object, &seen3D))
+                    return current;
+            }
+            if (QQuickItem *item = qobject_cast<QQuickItem *>(current)) {
+                const QList<QQuickItem *> children = item->childItems();
+                for (QQuickItem *child : children)
+                    stack.append(child);
+            }
+        }
+    }
+
+    return nullptr;
+}
+
+static bool vectorProperty(QObject *object, const QString &propertyName, QVector3D *value)
+{
+    const QVariant variant = QQmlProperty(object, propertyName).read();
+    if (!variant.isValid() || !variant.canConvert<QVector3D>())
+        return false;
+    *value = variant.value<QVector3D>();
+    return true;
+}
+
+static bool matrixProperty(QObject *object, const char *propertyName, QMatrix4x4 *value)
+{
+    const QVariant variant = object->property(propertyName);
+    if (!variant.isValid() || variant.metaType().id() != QMetaType::QMatrix4x4)
+        return false;
+    *value = variant.value<QMatrix4x4>();
+    return true;
+}
+
+static QJsonObject bounds3DObject(const QVector3D &minimum, const QVector3D &maximum)
+{
+    const QVector3D size(maximum.x() - minimum.x(),
+                         maximum.y() - minimum.y(),
+                         maximum.z() - minimum.z());
+    return {
+        { QStringLiteral("minimum"), vector3DObject(minimum) },
+        { QStringLiteral("maximum"), vector3DObject(maximum) },
+        { QStringLiteral("center"), vector3DObject((minimum + maximum) * 0.5f) },
+        { QStringLiteral("size"), vector3DObject(size) },
+    };
+}
+
+static bool boundsUnavailable(const QVector3D &minimum, const QVector3D &maximum)
+{
+    const QVector3D size(maximum.x() - minimum.x(),
+                         maximum.y() - minimum.y(),
+                         maximum.z() - minimum.z());
+    return qFuzzyIsNull(size.lengthSquared());
+}
+
+static QVector<QVector3D> boundsCorners(const QVector3D &minimum, const QVector3D &maximum)
+{
+    return {
+        { minimum.x(), minimum.y(), minimum.z() },
+        { maximum.x(), minimum.y(), minimum.z() },
+        { minimum.x(), maximum.y(), minimum.z() },
+        { maximum.x(), maximum.y(), minimum.z() },
+        { minimum.x(), minimum.y(), maximum.z() },
+        { maximum.x(), minimum.y(), maximum.z() },
+        { minimum.x(), maximum.y(), maximum.z() },
+        { maximum.x(), maximum.y(), maximum.z() },
+    };
+}
+
+static QJsonObject quick3DRenderEvidence(QObject *object)
+{
+    QJsonObject evidence{
+        { QStringLiteral("available"), false },
+        { QStringLiteral("evidenceRole"), QStringLiteral("render-space") },
+    };
+    if (!isQuick3DModelObject(object)) {
+        evidence.insert(QStringLiteral("reason"), QStringLiteral("not_quick3d_model"));
+        return evidence;
+    }
+
+    QJsonArray limitations{
+        QStringLiteral("projection is geometric evidence from View3D mapFrom3DScene; it does not prove final raster visibility, occlusion, material opacity, or depth/culling state"),
+    };
+
+    QVector3D boundsMin;
+    QVector3D boundsMax;
+    const bool hasBounds = vectorProperty(object, QStringLiteral("bounds.minimum"), &boundsMin)
+            && vectorProperty(object, QStringLiteral("bounds.maximum"), &boundsMax);
+    const bool boundsReady = hasBounds && !boundsUnavailable(boundsMin, boundsMax);
+    if (boundsReady) {
+        evidence.insert(QStringLiteral("localBounds"), bounds3DObject(boundsMin, boundsMax));
+    } else {
+        const QString reason = hasBounds ? QStringLiteral("model_bounds_unavailable")
+                                         : QStringLiteral("bounds_property_unavailable");
+        evidence.insert(QStringLiteral("localBounds"), QJsonObject{
+            { QStringLiteral("available"), false },
+            { QStringLiteral("reason"), reason },
+            { QStringLiteral("note"),
+              QStringLiteral("Quick3D model bounds can be unavailable before the mesh is loaded or in offscreen/headless runs.") },
+        });
+        evidence.insert(QStringLiteral("reason"), reason);
+        evidence.insert(QStringLiteral("projection"), QJsonObject{
+            { QStringLiteral("available"), false },
+            { QStringLiteral("reason"), reason },
+        });
+        evidence.insert(QStringLiteral("distanceFromCamera"), QJsonObject{
+            { QStringLiteral("available"), false },
+            { QStringLiteral("reason"), reason },
+        });
+        evidence.insert(QStringLiteral("limitations"), limitations);
+        return evidence;
+    }
+
+    QMatrix4x4 sceneTransform;
+    const bool hasSceneTransform = matrixProperty(object, "sceneTransform", &sceneTransform);
+    if (!hasSceneTransform)
+        limitations.append(QStringLiteral("sceneTransform property was unavailable"));
+
+    QVector<QVector3D> worldCorners;
+    if (boundsReady && hasSceneTransform) {
+        QVector3D worldMin(std::numeric_limits<float>::max(),
+                           std::numeric_limits<float>::max(),
+                           std::numeric_limits<float>::max());
+        QVector3D worldMax(std::numeric_limits<float>::lowest(),
+                           std::numeric_limits<float>::lowest(),
+                           std::numeric_limits<float>::lowest());
+        const QVector<QVector3D> localCorners = boundsCorners(boundsMin, boundsMax);
+        for (const QVector3D &corner : localCorners) {
+            const QVector3D world = sceneTransform.map(corner);
+            worldCorners.append(world);
+            worldMin.setX(qMin(worldMin.x(), world.x()));
+            worldMin.setY(qMin(worldMin.y(), world.y()));
+            worldMin.setZ(qMin(worldMin.z(), world.z()));
+            worldMax.setX(qMax(worldMax.x(), world.x()));
+            worldMax.setY(qMax(worldMax.y(), world.y()));
+            worldMax.setZ(qMax(worldMax.z(), world.z()));
+        }
+        evidence.insert(QStringLiteral("worldBounds"), bounds3DObject(worldMin, worldMax));
+    }
+
+    QObject *viewport = quick3DViewportForObject(object);
+    if (!viewport) {
+        evidence.insert(QStringLiteral("projection"), QJsonObject{
+            { QStringLiteral("available"), false },
+            { QStringLiteral("reason"), QStringLiteral("view3d_not_found") },
+        });
+    } else {
+        evidence.insert(QStringLiteral("viewport"), QQmlAgentJsonUtils::valueFromVariant(
+                                QVariant::fromValue(viewport)));
+        evidence.insert(QStringLiteral("camera"), QQmlAgentJsonUtils::propertyValue(
+                                viewport, QStringLiteral("camera")));
+    }
+
+    QVector3D scenePosition;
+    if (vectorProperty(object, QStringLiteral("scenePosition"), &scenePosition))
+        evidence.insert(QStringLiteral("scenePosition"), vector3DObject(scenePosition));
+
+    QObject *camera = objectProperty(viewport, "camera");
+    QVector3D cameraPosition;
+    if (camera && vectorProperty(camera, QStringLiteral("scenePosition"), &cameraPosition)
+            && vectorProperty(object, QStringLiteral("scenePosition"), &scenePosition)) {
+        evidence.insert(QStringLiteral("distanceFromCamera"),
+                        double((scenePosition - cameraPosition).length()));
+    } else {
+        evidence.insert(QStringLiteral("distanceFromCamera"), QJsonObject{
+            { QStringLiteral("available"), false },
+            { QStringLiteral("reason"), QStringLiteral("camera_or_scene_position_unavailable") },
+        });
+    }
+
+    if (viewport && boundsReady && hasSceneTransform) {
+        QQuickItem *viewportItem = qobject_cast<QQuickItem *>(viewport);
+        QRectF viewportRect;
+        QPointF viewportWindowOrigin;
+        if (viewportItem) {
+            viewportRect = QRectF(QPointF(0, 0), QSizeF(viewportItem->width(), viewportItem->height()));
+            viewportWindowOrigin = itemBoxInWindow(viewportItem).topLeft();
+        }
+
+        QRectF projectedViewBounds;
+        QRectF projectedScreenBounds;
+        QJsonArray projectedCorners;
+        bool projectedAny = false;
+        bool allMapped = true;
+        for (const QVector3D &corner : worldCorners) {
+            QVector3D viewPosition;
+            const bool mapped = QMetaObject::invokeMethod(
+                    viewport,
+                    "mapFrom3DScene",
+                    Qt::DirectConnection,
+                    Q_RETURN_ARG(QVector3D, viewPosition),
+                    Q_ARG(QVector3D, corner));
+            if (!mapped) {
+                allMapped = false;
+                break;
+            }
+            const QPointF viewPoint(viewPosition.x(), viewPosition.y());
+            const QPointF screenPoint = viewportWindowOrigin + viewPoint;
+            const QRectF viewPointRect(viewPoint, QSizeF(0, 0));
+            const QRectF screenPointRect(screenPoint, QSizeF(0, 0));
+            projectedViewBounds = projectedAny ? projectedViewBounds.united(viewPointRect)
+                                               : viewPointRect;
+            projectedScreenBounds = projectedAny ? projectedScreenBounds.united(screenPointRect)
+                                                 : screenPointRect;
+            projectedAny = true;
+            projectedCorners.append(QJsonObject{
+                { QStringLiteral("view"), vector3DObject(viewPosition) },
+                { QStringLiteral("screen"), QJsonArray{ screenPoint.x(), screenPoint.y(), viewPosition.z() } },
+            });
+        }
+
+        if (allMapped && projectedAny) {
+            const QRectF intersection = projectedViewBounds.intersected(viewportRect);
+            evidence.insert(QStringLiteral("projection"), QJsonObject{
+                { QStringLiteral("available"), true },
+                { QStringLiteral("coordinateSpace"), QStringLiteral("view3d-local-and-window") },
+                { QStringLiteral("viewBounds"), rectArray(projectedViewBounds) },
+                { QStringLiteral("screenBounds"), rectArray(projectedScreenBounds) },
+                { QStringLiteral("viewViewport"), rectArray(viewportRect) },
+                { QStringLiteral("corners"), projectedCorners },
+                { QStringLiteral("centerInsideViewport"), viewportRect.contains(projectedViewBounds.center()) },
+                { QStringLiteral("partiallyInsideViewport"), !intersection.isEmpty() },
+                { QStringLiteral("fullyInsideViewport"), viewportRect.contains(projectedViewBounds) },
+            });
+            evidence.insert(QStringLiteral("inFrustum"), QJsonObject{
+                { QStringLiteral("value"), !intersection.isEmpty() },
+                { QStringLiteral("method"), QStringLiteral("projected_bounds_viewport_overlap") },
+                { QStringLiteral("confidence"), 0.65 },
+                { QStringLiteral("limitations"), QJsonArray{
+                    QStringLiteral("uses projected model bounds overlap as an approximation"),
+                    QStringLiteral("does not account for occlusion or material/depth state"),
+                } },
+            });
+        } else {
+            evidence.insert(QStringLiteral("projection"), QJsonObject{
+                { QStringLiteral("available"), false },
+                { QStringLiteral("reason"), QStringLiteral("mapFrom3DScene_unavailable") },
+            });
+        }
+    }
+
+    evidence.insert(QStringLiteral("available"), true);
+    evidence.insert(QStringLiteral("limitations"), limitations);
+    return evidence;
 }
 
 // QML ids are only unique per component scope and objectName is not enforced
@@ -1094,6 +1392,8 @@ static QJsonObject nodeForObjectInternal(QObject *object, int windowId, int dept
         if (opacityIndex >= 0)
             insertField(&node, options, QStringLiteral("opacity"),
                         object->property("opacity").toDouble());
+        if (fieldRequested(options, QStringLiteral("render3D")) && isQuick3DModelObject(object))
+            node.insert(QStringLiteral("render3D"), quick3DRenderEvidence(object));
     }
 
     QJsonArray selectors;

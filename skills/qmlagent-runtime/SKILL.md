@@ -129,8 +129,10 @@ When QmlAgent is built with `Qt6::Quick3D`, `qmlagent_ui_get_tree` and
 `qmlagent_ui_query` include QtQuick3D frontend nodes below `View3D`
 automatically. Use normal selectors (`id=`, `objectName=`, `sourceLocation=`)
 for `Model`, camera, light, material, texture, and related nodes. These nodes
-are structural/source evidence, not `QQuickItem` click targets; 2D input
-correlation requires a future picking or projection bridge.
+are structural/source evidence, not `QQuickItem` click targets. For `Model`
+visibility/debugging, request `fields:["render3D"]` to get world bounds,
+projected screen bounds, camera distance, and approximate frustum evidence.
+Picking is still future work.
 
 On an input result, `delivered:true` is the action-success signal. The nested
 `settle` object is render-loop-only (`verificationRole: render-loop-settle-only`):
