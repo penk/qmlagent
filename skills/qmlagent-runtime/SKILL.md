@@ -132,7 +132,9 @@ for `Model`, camera, light, material, texture, and related nodes. These nodes
 are structural/source evidence, not `QQuickItem` click targets. For `Model`
 visibility/debugging, request `fields:["render3D"]` to get world bounds,
 projected screen bounds, camera distance, and approximate frustum evidence.
-Picking is still future work.
+Use `qmlagent_render_pick3d` or `Render.pick3D` on a `View3D` selector for
+read-only hit-test evidence at a View3D-local coordinate; it does not deliver
+input events.
 
 On an input result, `delivered:true` is the action-success signal. The nested
 `settle` object is render-loop-only (`verificationRole: render-loop-settle-only`):

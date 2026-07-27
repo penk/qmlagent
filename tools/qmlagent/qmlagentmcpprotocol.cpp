@@ -212,6 +212,22 @@ QJsonArray toolList()
                      { QStringLiteral("description"), QStringLiteral("Maximum wait in milliseconds. Defaults to the service default when omitted.") },
                  } },
              }, { QStringLiteral("selector"), QStringLiteral("until") })),
+        tool(QStringLiteral("qmlagent_render_pick3d"),
+             QStringLiteral("Read-only QtQuick3D View3D hit test at a View3D-local logical-pixel coordinate. Use after UI.query fields=[\"render3D\"] when you need to connect screen-space evidence to a Model selector. This does not deliver input events and 3D Model nodes remain non-QQuickItem click targets."),
+             schema({
+                 { QStringLiteral("selector"), QJsonObject{
+                     { QStringLiteral("type"), QStringLiteral("string") },
+                     { QStringLiteral("description"), QStringLiteral("Selector for the View3D node to pick within.") },
+                 } },
+                 { QStringLiteral("x"), QJsonObject{
+                     { QStringLiteral("type"), QStringLiteral("number") },
+                     { QStringLiteral("description"), QStringLiteral("X coordinate in View3D-local logical pixels.") },
+                 } },
+                 { QStringLiteral("y"), QJsonObject{
+                     { QStringLiteral("type"), QStringLiteral("number") },
+                     { QStringLiteral("description"), QStringLiteral("Y coordinate in View3D-local logical pixels.") },
+                 } },
+             }, { QStringLiteral("selector"), QStringLiteral("x"), QStringLiteral("y") })),
         tool(QStringLiteral("qmlagent_ui_subscribe"),
              QStringLiteral("Subscribe to coalesced QmlAgent UI.treeChanged events on this persistent connection."),
              schema({})),

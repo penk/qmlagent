@@ -52,6 +52,7 @@ qt_add_executable(tst_qmlagentinput
     ${PROJECT_SOURCE_DIR}/src/plugins/qmltooling/qmldbg_agent/qqmlagentdiagnostics.cpp
     ${PROJECT_SOURCE_DIR}/src/plugins/qmltooling/qmldbg_agent/qqmlagentlogbuffer.cpp
     ${PROJECT_SOURCE_DIR}/src/plugins/qmltooling/qmldbg_agent/qqmlagentlogcollector.cpp
+    ${PROJECT_SOURCE_DIR}/src/plugins/qmltooling/qmldbg_agent/qqmlagentrender.cpp
     ${PROJECT_SOURCE_DIR}/src/plugins/qmltooling/qmldbg_agent/qqmlagentruntime.cpp
     ${PROJECT_SOURCE_DIR}/src/plugins/qmltooling/qmldbg_agent/qqmlagentuitree.cpp
     ${PROJECT_SOURCE_DIR}/src/plugins/qmltooling/qmldbg_agent/qqmlagentsourceresolver.cpp

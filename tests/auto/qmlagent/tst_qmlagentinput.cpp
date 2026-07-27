@@ -4,6 +4,7 @@
 #include "qqmlagentinput_p.h"
 #include "qqmlagentdiagnostics_p.h"
 #include "qqmlagentlogcollector_p.h"
+#include "qqmlagentrender_p.h"
 #include "qqmlagentruntime_p.h"
 #include "qqmlagentuitree_p.h"
 
@@ -679,6 +680,24 @@ Window {
     QCOMPARE(render3D.value(QStringLiteral("distanceFromCamera")).toObject()
                      .value(QStringLiteral("reason")).toString(),
              QStringLiteral("model_bounds_unavailable"));
+
+    const QJsonObject pick = QQmlAgentRender::pick3D({
+        { QStringLiteral("selector"), QStringLiteral("objectName=\"quick3d.probe.view\"") },
+        { QStringLiteral("x"), 10 },
+        { QStringLiteral("y"), 10 },
+    });
+    QVERIFY2(pick.value(QStringLiteral("ok")).toBool(),
+             qPrintable(QJsonDocument(pick).toJson(QJsonDocument::Compact)));
+    QCOMPARE(pick.value(QStringLiteral("coordinateSpace")).toString(),
+             QStringLiteral("view3d-local-logical-pixels"));
+    QCOMPARE(pick.value(QStringLiteral("hit")).toBool(), false);
+    QCOMPARE(pick.value(QStringLiteral("pick")).toObject()
+                     .value(QStringLiteral("hitType")).toObject()
+                     .value(QStringLiteral("name")).toString(),
+             QStringLiteral("Null"));
+    QCOMPARE(pick.value(QStringLiteral("point")).toObject()
+                     .value(QStringLiteral("x")).toInt(),
+             10);
     QCOMPARE(model.value(QStringLiteral("properties")).toObject()
                      .value(QStringLiteral("source")).toString(),
              QStringLiteral("#Cube"));

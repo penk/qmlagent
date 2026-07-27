@@ -943,6 +943,7 @@ static QStringList qmlAgentProtocolMethods()
         QStringLiteral("Input.typeText"),
         QStringLiteral("Input.dismissPopup"),
         QStringLiteral("Render.captureScreenshot"),
+        QStringLiteral("Render.pick3D"),
         QStringLiteral("Runtime.setProperty"),
         QStringLiteral("Runtime.invokeMethod"),
         QStringLiteral("Source.resolveNode"),
@@ -970,6 +971,7 @@ static void printCallHelp()
            << "  qmlagentctl call Input.scrollIntoView --params '{\"selector\":\"id=\\\"saveButton\\\"\"}'\n"
            << "  qmlagentctl call UI.waitFor --params '{\"selector\":\"id=\\\"popup\\\"\",\"until\":{\"state\":\"found\"}}'\n"
            << "  qmlagentctl call Diagnostics.analyzeBinding --params '{\"selector\":\"id=\\\"panel\\\"\",\"property\":\"x\"}'\n"
+           << "  qmlagentctl call Render.pick3D --params '{\"selector\":\"id=\\\"view3d\\\"\",\"x\":160,\"y\":120}'\n"
            << "  qmlagentctl call Render.captureScreenshot --params '{\"scale\":0.5}'\n"
            << "\nScreenshot data is omitted by default; pass includeData:true only when\n"
            << "PNG bytes are needed, and prefer scale/region to bound them.\n";
@@ -992,10 +994,12 @@ static void printMethodsHelp(const QStringList &methods, const QString &origin,
            << "  Input.scrollIntoView     recover from center_outside_viewport on clipped content\n"
            << "  UI.getTree / UI.query    include QtQuick3D View3D scene nodes automatically when capabilities.qtQuick3D.enabled is true\n"
            << "  UI.query fields=render3D  Quick3D model world bounds, projected screen bounds, distance, and frustum evidence\n"
+           << "  Render.pick3D            read-only View3D hit-test evidence for a viewport coordinate\n"
            << "\nMCP/tool equivalents:\n"
            << "  qmlagent_ui_query_many\n"
            << "  qmlagent_input_scroll_into_view\n"
-           << "  qmlagent_ui_get_tree / qmlagent_ui_query for QtQuick3D structural/source evidence; request fields=[\"render3D\"] for model projection evidence\n";
+           << "  qmlagent_ui_get_tree / qmlagent_ui_query for QtQuick3D structural/source evidence; request fields=[\"render3D\"] for model projection evidence\n"
+           << "  qmlagent_render_pick3d for read-only View3D hit-test evidence\n";
 }
 
 static int runCtlSubcommand(const QStringList &arguments)
@@ -1019,6 +1023,7 @@ static int runCtlSubcommand(const QStringList &arguments)
                 << "  qmlagentctl clear-text <selector>\n"
                 << "  qmlagentctl dismiss-popup [--all]\n"
                 << "  qmlagentctl wait <selector> --state found|notFound [--timeout ms]\n"
+                << "  qmlagentctl pick3d <view3d-selector> --x px --y px\n"
                 << "  qmlagentctl screenshot [--window-id n] [--scale 0.5] [--region x,y,w,h] [--include-data] [--out file.png]\n"
                 << "  qmlagentctl reload-preview\n"
                 << "  qmlagentctl stop\n"
@@ -1027,7 +1032,9 @@ static int runCtlSubcommand(const QStringList &arguments)
                 << "UI.query include View3D scene frontend nodes automatically. These nodes\n"
                 << "are structural/source evidence, not QQuickItem click targets. Request\n"
                 << "fields=[\"render3D\"] on Model nodes for world bounds, projected screen\n"
-                << "bounds, camera distance, and approximate frustum evidence.\n\n"
+                << "bounds, camera distance, and approximate frustum evidence. Use\n"
+                << "qmlagentctl pick3d <view3d-selector> --x px --y px for read-only\n"
+                << "View3D hit-test evidence.\n\n"
                 << "Screenshot is fallback visual evidence. Use structural UI,\n"
                 << "diagnostics, source, log, and input/workflow evidence first;\n"
                 << "--include-data is opt-in to preserve agent context.\n"
@@ -1333,6 +1340,21 @@ static int runCtlSubcommand(const QStringList &arguments)
             method = QStringLiteral("Input.dismissPopup");
             if (arguments.contains(QStringLiteral("--all")))
                 params = { { QStringLiteral("all"), true } };
+        } else if (command == QLatin1String("pick3d")) {
+            if (arguments.size() < 3)
+                return fail(QStringLiteral("qmlagentctl pick3d requires a View3D selector."));
+            bool xOk = false;
+            bool yOk = false;
+            const double x = argumentValue(arguments, QStringLiteral("--x")).toDouble(&xOk);
+            const double y = argumentValue(arguments, QStringLiteral("--y")).toDouble(&yOk);
+            if (!xOk || !yOk)
+                return fail(QStringLiteral("qmlagentctl pick3d requires numeric --x and --y values."));
+            method = QStringLiteral("Render.pick3D");
+            params = {
+                { QStringLiteral("selector"), arguments.at(2) },
+                { QStringLiteral("x"), x },
+                { QStringLiteral("y"), y },
+            };
         } else if (command == QLatin1String("wait")) {
             if (arguments.size() < 3)
                 return fail(QStringLiteral("qmlagentctl wait requires a selector."));
@@ -2209,6 +2231,19 @@ private:
                                  toFile || arguments.value(QStringLiteral("includeData")).toBool(false));
             return true;
         }
+        if (name == QLatin1String("qmlagent_render_pick3d")) {
+            *targetMethod = QStringLiteral("Render.pick3D");
+            *targetParams = nodeRef(arguments, error);
+            if (!error->isEmpty())
+                return false;
+            if (!arguments.contains(QStringLiteral("x")) || !arguments.contains(QStringLiteral("y"))) {
+                *error = QStringLiteral("Provide x and y.");
+                return false;
+            }
+            targetParams->insert(QStringLiteral("x"), arguments.value(QStringLiteral("x")));
+            targetParams->insert(QStringLiteral("y"), arguments.value(QStringLiteral("y")));
+            return true;
+        }
         if (name == QLatin1String("qmlagent_source_resolve")) {
             *targetMethod = QStringLiteral("Source.resolveNode");
             *targetParams = nodeRef(arguments, error);
@@ -2519,7 +2554,8 @@ private:
               QStringLiteral("qmlagent_ui_query_many") },
             { QStringLiteral("tree"), QStringLiteral("qmlagent_ui_get_tree") },
             { QStringLiteral("qtQuick3D"),
-              QStringLiteral("When target capabilities.qtQuick3D.enabled is true, qmlagent_ui_get_tree and qmlagent_ui_query include View3D scene Model/camera/light/material frontend nodes automatically; use them as structural/source evidence, not click targets.") },
+              QStringLiteral("When target capabilities.qtQuick3D.enabled is true, qmlagent_ui_get_tree and qmlagent_ui_query include View3D scene Model/camera/light/material frontend nodes automatically; use them as structural/source evidence, not click targets. Request fields=[\"render3D\"] for Model projection evidence and qmlagent_render_pick3d for read-only View3D hit-test evidence.") },
+            { QStringLiteral("quick3DHitTest"), QStringLiteral("qmlagent_render_pick3d") },
             { QStringLiteral("click"), QStringLiteral("qmlagent_input_click") },
             { QStringLiteral("longPress"), QStringLiteral("qmlagent_input_long_press") },
             { QStringLiteral("dragSliderHandleSwipe"),
@@ -2552,6 +2588,7 @@ private:
                 QStringLiteral("qmlagent_input_drag Slider RangeSlider Dial handle drag"),
                 QStringLiteral("qmlagent_input_wheel Flickable ListView GridView TableView TreeView scroll"),
                 QStringLiteral("qmlagent_input_focus TextField TextArea before type text"),
+                QStringLiteral("qmlagent_render_pick3d QtQuick3D View3D pick hit test Model screen coordinate"),
                 QStringLiteral("qmlagent_render_capture_screenshot fallback visual evidence only structured first"),
             } },
             { QStringLiteral("fallbacks"), QJsonObject{

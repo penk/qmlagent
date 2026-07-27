@@ -12,6 +12,7 @@
 #include <QtGui/qfont.h>
 #include <QtGui/qmatrix4x4.h>
 #include <QtGui/qquaternion.h>
+#include <QtGui/qvector2d.h>
 #include <QtGui/qvector3d.h>
 #include <QtQml/qqmllist.h>
 #include <QtQml/qqmlproperty.h>
@@ -203,6 +204,13 @@ QJsonValue valueFromVariant(const QVariant &value)
             { QStringLiteral("x"), vector.x() },
             { QStringLiteral("y"), vector.y() },
             { QStringLiteral("z"), vector.z() },
+        };
+    }
+    case QMetaType::QVector2D: {
+        const QVector2D vector = value.value<QVector2D>();
+        return QJsonObject{
+            { QStringLiteral("x"), vector.x() },
+            { QStringLiteral("y"), vector.y() },
         };
     }
     case QMetaType::QQuaternion: {

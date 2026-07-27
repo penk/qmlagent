@@ -12,6 +12,7 @@ class QQmlAgentRender
 {
 public:
     static QJsonObject captureScreenshot(const QJsonObject &params);
+    static QJsonObject pick3D(const QJsonObject &params);
 };
 
 QT_END_NAMESPACE

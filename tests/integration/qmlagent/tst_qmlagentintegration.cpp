@@ -563,6 +563,9 @@ void QmlAgentIntegrationTest::clickNodeDeliversSyntheticInput()
                     .value(QStringLiteral("features")).toArray()
                     .contains(QStringLiteral("Input.longPressNode")));
     QVERIFY(infoResponse->value(QStringLiteral("result")).toObject()
+                    .value(QStringLiteral("features")).toArray()
+                    .contains(QStringLiteral("Render.pick3D")));
+    QVERIFY(infoResponse->value(QStringLiteral("result")).toObject()
                     .value(QStringLiteral("capabilities")).toObject()
                     .value(QStringLiteral("payloadLimits")).toObject()
                     .value(QStringLiteral("maxOutboundMessageBytes")).toInt() > 0);
@@ -3919,6 +3922,8 @@ void QmlAgentIntegrationTest::referenceClientConvenienceCommands()
     QVERIFY2(callHelpOutput.contains("UI.query"), callHelpOutput.constData());
     QVERIFY2(callHelpOutput.contains("Diagnostics.analyzeBinding"),
              callHelpOutput.constData());
+    QVERIFY2(callHelpOutput.contains("Render.pick3D"),
+             callHelpOutput.constData());
     QVERIFY2(callHelpOutput.contains("Render.captureScreenshot"),
              callHelpOutput.constData());
 
@@ -4758,6 +4763,7 @@ void QmlAgentIntegrationTest::referenceClientMcpPersistentMode()
     bool sawInputTouch = false;
     bool sawInputWheel = false;
     bool sawInputClearText = false;
+    bool sawRenderPick3D = false;
     bool sawRuntimeEnableMutation = false;
     bool sawRuntimeSetProperty = false;
     bool sawRuntimeInvokeMethod = false;
@@ -4779,6 +4785,7 @@ void QmlAgentIntegrationTest::referenceClientMcpPersistentMode()
         sawInputTouch |= name == QLatin1String("qmlagent_input_touch");
         sawInputWheel |= name == QLatin1String("qmlagent_input_wheel");
         sawInputClearText |= name == QLatin1String("qmlagent_input_clear_text");
+        sawRenderPick3D |= name == QLatin1String("qmlagent_render_pick3d");
         sawRuntimeEnableMutation |= name == QLatin1String("qmlagent_runtime_enable_mutation");
         sawRuntimeSetProperty |= name == QLatin1String("qmlagent_runtime_set_property");
         sawRuntimeInvokeMethod |= name == QLatin1String("qmlagent_runtime_invoke_method");
@@ -4799,6 +4806,7 @@ void QmlAgentIntegrationTest::referenceClientMcpPersistentMode()
     QVERIFY2(sawInputTouch, output.constData());
     QVERIFY2(sawInputWheel, output.constData());
     QVERIFY2(sawInputClearText, output.constData());
+    QVERIFY2(sawRenderPick3D, output.constData());
     QVERIFY2(sawRuntimeEnableMutation, output.constData());
     QVERIFY2(sawRuntimeSetProperty, output.constData());
     QVERIFY2(sawRuntimeInvokeMethod, output.constData());

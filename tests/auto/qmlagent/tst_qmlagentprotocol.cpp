@@ -274,6 +274,19 @@ void tst_QQmlAgentProtocol::mcpToolSchemasExposeAgentFirstContracts()
                     .contains(QStringLiteral("projected screen bounds")),
              qPrintable(QJsonDocument(query).toJson(QJsonDocument::Compact)));
 
+    const QJsonObject pick3D = mcpToolByName(QStringLiteral("qmlagent_render_pick3d"));
+    QVERIFY(!pick3D.isEmpty());
+    const QString pick3DDescription = pick3D.value(QStringLiteral("description")).toString();
+    QVERIFY2(pick3DDescription.contains(QStringLiteral("Read-only QtQuick3D")),
+             qPrintable(QJsonDocument(pick3D).toJson(QJsonDocument::Compact)));
+    QVERIFY2(pick3DDescription.contains(QStringLiteral("does not deliver input events")),
+             qPrintable(QJsonDocument(pick3D).toJson(QJsonDocument::Compact)));
+    const QJsonObject pick3DProperties = pick3D.value(QStringLiteral("inputSchema")).toObject()
+            .value(QStringLiteral("properties")).toObject();
+    QVERIFY(pick3DProperties.contains(QStringLiteral("selector")));
+    QVERIFY(pick3DProperties.contains(QStringLiteral("x")));
+    QVERIFY(pick3DProperties.contains(QStringLiteral("y")));
+
     const QJsonObject scrollIntoView =
             mcpToolByName(QStringLiteral("qmlagent_input_scroll_into_view"));
     QVERIFY(!scrollIntoView.isEmpty());

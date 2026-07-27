@@ -88,6 +88,7 @@ static const QStringList &agentMethods()
         QStringLiteral("Input.typeText"),
         QStringLiteral("Input.dismissPopup"),
         QStringLiteral("Render.captureScreenshot"),
+        QStringLiteral("Render.pick3D"),
         QStringLiteral("Runtime.setProperty"),
         QStringLiteral("Runtime.invokeMethod"),
         QStringLiteral("Source.resolveNode"),
@@ -505,6 +506,8 @@ QJsonObject QQmlAgentService::dispatch(const QString &method, const QJsonObject 
                                        dispatchTimeoutMs);
     if (method == QLatin1String("Render.captureScreenshot"))
         return runOnGuiThreadBlocking([params]() { return QQmlAgentRender::captureScreenshot(params); });
+    if (method == QLatin1String("Render.pick3D"))
+        return runOnGuiThreadBlocking([params]() { return QQmlAgentRender::pick3D(params); });
     if (method == QLatin1String("Runtime.setProperty")) {
         if (!m_runtimeMutationEnabled)
             return runtimeMutationDisabledResult();
@@ -570,6 +573,7 @@ QJsonObject QQmlAgentService::sessionInfo() const
                     QStringLiteral("UI.getTree"),
                     QStringLiteral("UI.query"),
                     QStringLiteral("UI.queryMany"),
+                    QStringLiteral("Render.pick3D"),
                 } },
                 { QStringLiteral("note"),
                   QStringLiteral("View3D scene frontend nodes are included automatically when enabled; 3D nodes are not QQuickItem input targets") },
