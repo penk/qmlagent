@@ -9,6 +9,7 @@ project(QmlAgent
 )
 
 find_package(Qt6 6.11 REQUIRED COMPONENTS Core Gui Network Qml Quick QuickControls2 Test QmlPrivate QuickPrivate QmlDebugPrivate QuickTemplates2Private)
+find_package(Qt6 6.11 QUIET COMPONENTS Quick3D)
 
 qt_standard_project_setup()
 if(COMMAND qt_policy)

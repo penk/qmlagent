@@ -241,6 +241,32 @@ void tst_QQmlAgentProtocol::mcpToolSchemasExposeAgentFirstContracts()
     QVERIFY2(queryMany.value(QStringLiteral("description")).toString()
                     .contains(QStringLiteral("Batch verification reads")),
              qPrintable(QJsonDocument(queryMany).toJson(QJsonDocument::Compact)));
+    const QJsonObject queryManyItemProperties = queryMany.value(QStringLiteral("inputSchema"))
+            .toObject().value(QStringLiteral("properties")).toObject()
+            .value(QStringLiteral("queries")).toObject()
+            .value(QStringLiteral("items")).toObject()
+            .value(QStringLiteral("properties")).toObject();
+    const QString oldQuick3DFlag = QStringLiteral("include") + QStringLiteral("3D");
+    QVERIFY(!queryManyItemProperties.contains(oldQuick3DFlag));
+    const QJsonObject getTree = mcpToolByName(QStringLiteral("qmlagent_ui_get_tree"));
+    QVERIFY(!getTree.isEmpty());
+    const QJsonObject getTreeProperties = getTree.value(QStringLiteral("inputSchema"))
+            .toObject().value(QStringLiteral("properties")).toObject();
+    QVERIFY(!getTreeProperties.contains(oldQuick3DFlag));
+    QVERIFY2(getTree.value(QStringLiteral("description")).toString()
+                    .contains(QStringLiteral("QtQuick3D")),
+             qPrintable(QJsonDocument(getTree).toJson(QJsonDocument::Compact)));
+    QVERIFY2(getTree.value(QStringLiteral("description")).toString()
+                    .contains(QStringLiteral("not QQuickItem click targets")),
+             qPrintable(QJsonDocument(getTree).toJson(QJsonDocument::Compact)));
+    const QJsonObject query = mcpToolByName(QStringLiteral("qmlagent_ui_query"));
+    QVERIFY(!query.isEmpty());
+    QVERIFY(!query.value(QStringLiteral("inputSchema")).toObject()
+                    .value(QStringLiteral("properties")).toObject()
+                    .contains(oldQuick3DFlag));
+    QVERIFY2(query.value(QStringLiteral("description")).toString()
+                    .contains(QStringLiteral("QtQuick3D")),
+             qPrintable(QJsonDocument(query).toJson(QJsonDocument::Compact)));
 
     const QJsonObject scrollIntoView =
             mcpToolByName(QStringLiteral("qmlagent_input_scroll_into_view"));

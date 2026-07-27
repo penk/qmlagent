@@ -107,6 +107,15 @@ static bool methodRequiresRuntimeMutation(const QString &method)
             || method == QLatin1String("Runtime.invokeMethod");
 }
 
+static bool qtQuick3DAvailable()
+{
+#ifdef QMLAGENT_HAS_QUICK3D
+    return true;
+#else
+    return false;
+#endif
+}
+
 static QByteArray boundedResponse(const QJsonValue &id, const QString &method,
                                   const QJsonObject &result)
 {
@@ -553,6 +562,17 @@ QJsonObject QQmlAgentService::sessionInfo() const
             { QStringLiteral("renderScreenshot"), QJsonObject{
                 { QStringLiteral("enabled"), true },
                 { QStringLiteral("evidenceRole"), QStringLiteral("fallback-supporting") },
+            } },
+            { QStringLiteral("qtQuick3D"), QJsonObject{
+                { QStringLiteral("enabled"), qtQuick3DAvailable() },
+                { QStringLiteral("evidenceRole"), QStringLiteral("structural-source") },
+                { QStringLiteral("methods"), QJsonArray{
+                    QStringLiteral("UI.getTree"),
+                    QStringLiteral("UI.query"),
+                    QStringLiteral("UI.queryMany"),
+                } },
+                { QStringLiteral("note"),
+                  QStringLiteral("View3D scene frontend nodes are included automatically when enabled; 3D nodes are not QQuickItem input targets") },
             } },
             { QStringLiteral("payloadLimits"), QJsonObject{
                 { QStringLiteral("maxInboundMessageBytes"), QQmlAgentProtocol::MaxInboundMessageBytes },

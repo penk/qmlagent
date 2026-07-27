@@ -143,7 +143,7 @@ QJsonArray toolList()
              QStringLiteral("Stop the current qmlagent-launcher session discovered in the workspace. Use this to close a preview or application session without manual process killing."),
              schema({})),
         tool(QStringLiteral("qmlagent_ui_get_tree"),
-             QStringLiteral("Get a projected Qt Quick UI tree. Keep fields/maxNodes bounded unless full evidence is required. If selector is supplied without depth, the adapter searches the full tree and returns the matched branch."),
+             QStringLiteral("Get a projected Qt Quick UI tree. Keep fields/maxNodes bounded unless full evidence is required. If selector is supplied without depth, the adapter searches the full tree and returns the matched branch. When this QmlAgent build has QtQuick3D support, View3D scenes include Model/camera/light/material frontend nodes automatically. 3D nodes are structural evidence, not QQuickItem click targets."),
              schema({
                  { QStringLiteral("depth"), QJsonObject{ { QStringLiteral("type"), QStringLiteral("integer") } } },
                  { QStringLiteral("includeInvisible"), QJsonObject{ { QStringLiteral("type"), QStringLiteral("boolean") } } },
@@ -155,7 +155,7 @@ QJsonArray toolList()
                  { QStringLiteral("collapseRepeated"), QJsonObject{ { QStringLiteral("type"), QStringLiteral("boolean") } } },
              })),
         tool(QStringLiteral("qmlagent_ui_query"),
-             QStringLiteral("Query nodes by stable QmlAgent selector. Defaults to verbosity=\"summary\" to protect agent context; ask for verbosity=\"full\" only when omittedFields/nextHints say deeper node evidence is needed. Prefer selector over nodeId across restarts. For repeated delegates, try id/objectName plus index such as id=\"boxRect\" index=0 before adding objectName or using session-local nodeId. Requested properties are returned even when fields is projected. If a single qmlagent-launcher session exists, this routes through the launcher automatically; no direct attach is needed. Use this to find selectors before qmlagent_input_drag, qmlagent_input_wheel, qmlagent_ui_wait_for, or qmlagent_workflow_click_and_wait."),
+             QStringLiteral("Query nodes by stable QmlAgent selector. Defaults to verbosity=\"summary\" to protect agent context; ask for verbosity=\"full\" only when omittedFields/nextHints say deeper node evidence is needed. Prefer selector over nodeId across restarts. When this QmlAgent build has QtQuick3D support, View3D scenes include Model/camera/light/material frontend nodes automatically. Those nodes are structural evidence, not QQuickItem click targets. For repeated delegates, try id/objectName plus index such as id=\"boxRect\" index=0 before adding objectName or using session-local nodeId. Requested properties are returned even when fields is projected. If a single qmlagent-launcher session exists, this routes through the launcher automatically; no direct attach is needed. Use this to find selectors before qmlagent_input_drag, qmlagent_input_wheel, qmlagent_ui_wait_for, or qmlagent_workflow_click_and_wait."),
              schema({
                  { QStringLiteral("selector"), QJsonObject{ { QStringLiteral("type"), QStringLiteral("string") } } },
                  { QStringLiteral("includeSource"), QJsonObject{ { QStringLiteral("type"), QStringLiteral("boolean") } } },

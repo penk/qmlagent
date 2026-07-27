@@ -15,17 +15,23 @@
 #include <QtCore/qproperty.h>
 #include <QtCore/qregularexpression.h>
 #include <QtCore/qset.h>
+#include <QtCore/qurl.h>
 #include <QtCore/qtimer.h>
 #include <QtCore/qvariant.h>
 #include <QtCore/qvector.h>
 #include <QtGui/qcolor.h>
 #include <QtGui/qguiapplication.h>
+#include <QtGui/qquaternion.h>
+#include <QtGui/qvector3d.h>
 #include <QtGui/qwindow.h>
 #include <QtQml/qqmlcontext.h>
 #include <QtQml/qqmlproperty.h>
 #include <QtQml/qqmlengine.h>
 #include <QtQuick/qquickitem.h>
 #include <QtQuick/qquickwindow.h>
+#ifdef QMLAGENT_HAS_QUICK3D
+#include <QtQuick3D/qquick3dobject.h>
+#endif
 
 #include <private/qqmldebugservice_p.h>
 #include <private/qqmlcontextdata_p.h>
@@ -112,7 +118,9 @@ static QJsonArray typeAliases(QObject *object, const QString &primaryType)
         };
 
         appendAlias(className);
-        if (className.startsWith(QLatin1String("QQuick")) && className.size() > 6)
+        if (className.startsWith(QLatin1String("QQuick3D")) && className.size() > 8)
+            appendAlias(className.mid(8));
+        else if (className.startsWith(QLatin1String("QQuick")) && className.size() > 6)
             appendAlias(className.mid(6));
     }
     return aliases;
@@ -190,6 +198,8 @@ static QJsonValue jsonValueFromVariant(const QVariant &value)
         return value.toDouble();
     case QMetaType::QString:
         return value.toString();
+    case QMetaType::QUrl:
+        return value.toUrl().toString();
     case QMetaType::QColor: {
         const QColor color = qvariant_cast<QColor>(value);
         if (!color.isValid())
@@ -204,6 +214,23 @@ static QJsonValue jsonValueFromVariant(const QVariant &value)
         return QJsonObject{
             { QStringLiteral("x"), point.x() },
             { QStringLiteral("y"), point.y() },
+        };
+    }
+    case QMetaType::QVector3D: {
+        const QVector3D vector = value.value<QVector3D>();
+        return QJsonObject{
+            { QStringLiteral("x"), vector.x() },
+            { QStringLiteral("y"), vector.y() },
+            { QStringLiteral("z"), vector.z() },
+        };
+    }
+    case QMetaType::QQuaternion: {
+        const QQuaternion quaternion = value.value<QQuaternion>();
+        return QJsonObject{
+            { QStringLiteral("scalar"), quaternion.scalar() },
+            { QStringLiteral("x"), quaternion.x() },
+            { QStringLiteral("y"), quaternion.y() },
+            { QStringLiteral("z"), quaternion.z() },
         };
     }
     case QMetaType::QSize:
@@ -276,6 +303,119 @@ static QString sourceLocationSelectorForObject(QObject *object)
     return sourceLocationSelectorValue(location);
 }
 
+static bool isQuick3DObject(QObject *object)
+{
+#ifdef QMLAGENT_HAS_QUICK3D
+    return qobject_cast<QQuick3DObject *>(object);
+#else
+    Q_UNUSED(object);
+    return false;
+#endif
+}
+
+static bool quick3DTraversalAvailable()
+{
+#ifdef QMLAGENT_HAS_QUICK3D
+    return true;
+#else
+    return false;
+#endif
+}
+
+static bool isQuick3DViewportObject(QObject *object)
+{
+    return object && (object->inherits("QQuick3DViewport")
+                      || prettyTypeName(object) == QLatin1String("View3D"));
+}
+
+static QObject *objectProperty(QObject *object, const char *name)
+{
+    if (!object)
+        return nullptr;
+
+    const QVariant value = object->property(name);
+    if (!value.isValid())
+        return nullptr;
+    return value.value<QObject *>();
+}
+
+static bool hasAuthoredQuick3DIdentity(QObject *object)
+{
+    if (!object)
+        return false;
+    if (!qmlIdForObject(object).isEmpty() || !object->objectName().isEmpty())
+        return true;
+
+    const QJsonObject location = QQmlAgentSourceResolver::sourceLocationForObject(object);
+    return location.value(QStringLiteral("confidence")).toDouble() > 0.0
+            && !location.value(QStringLiteral("file")).toString().isEmpty();
+}
+
+static QList<QObject *> quick3DTraversalChildren(QObject *object)
+{
+    QList<QObject *> children;
+#ifdef QMLAGENT_HAS_QUICK3D
+    QSet<QObject *> seen;
+    const auto append = [&](QObject *child) {
+        if (!child || child == object || seen.contains(child))
+            return;
+        seen.insert(child);
+        children.append(child);
+    };
+    const auto appendQuick3DChildren = [&](QObject *root) {
+        if (auto *quick3DObject = qobject_cast<QQuick3DObject *>(root)) {
+            const QList<QQuick3DObject *> childItems = quick3DObject->childItems();
+            for (QQuick3DObject *child : childItems)
+                append(child);
+        }
+
+        const QObjectList objectChildren = root ? root->children() : QObjectList{};
+        for (QObject *child : objectChildren) {
+            if (qobject_cast<QQuick3DObject *>(child) && hasAuthoredQuick3DIdentity(child))
+                append(child);
+        }
+    };
+    const auto appendRootOrAuthoredChildren = [&](QObject *root) {
+        if (!root)
+            return;
+        if (hasAuthoredQuick3DIdentity(root)) {
+            append(root);
+            return;
+        }
+        appendQuick3DChildren(root);
+    };
+
+    if (isQuick3DViewportObject(object)) {
+        appendRootOrAuthoredChildren(objectProperty(object, "scene"));
+        appendRootOrAuthoredChildren(objectProperty(object, "importScene"));
+        append(objectProperty(object, "camera"));
+        QObject *environment = objectProperty(object, "environment");
+        if (hasAuthoredQuick3DIdentity(environment))
+            append(environment);
+    }
+
+    // Materials, textures, geometry, and other authored Quick3D resources are
+    // often QObject children rather than spatial childItems(). Keep this
+    // filtered to Quick3D frontend objects so traversal does not become a
+    // broad QObject dump.
+    appendQuick3DChildren(object);
+#else
+    Q_UNUSED(object);
+#endif
+    return children;
+}
+
+static bool quick3DObjectVisible(QObject *object)
+{
+    if (!isQuick3DObject(object))
+        return true;
+
+    const int visibleIndex = object->metaObject()->indexOfProperty("visible");
+    if (visibleIndex < 0)
+        return true;
+    return object->property("visible").toBool();
+}
+
 // QML ids are only unique per component scope and objectName is not enforced
 // at all, so a "high" stability claim must be backed by uniqueness in the
 // current tree. Counted over invisible nodes too, because node resolution for
@@ -296,7 +436,7 @@ static SelectorUniquenessIndex buildSelectorUniquenessIndex()
     };
     struct WalkEntry
     {
-        QQuickItem *item = nullptr;
+        QObject *object = nullptr;
         DelegateContext context;
     };
 
@@ -311,42 +451,43 @@ static SelectorUniquenessIndex buildSelectorUniquenessIndex()
         if (!quickWindow->objectName().isEmpty())
             ++index.objectNameCounts[quickWindow->objectName()];
         QVector<WalkEntry> stack{ { quickWindow->contentItem(), {} } };
-        QSet<QQuickItem *> seen;
+        QSet<QObject *> seen;
         while (!stack.isEmpty()) {
             const WalkEntry entry = stack.takeLast();
-            QQuickItem *item = entry.item;
-            if (!item || seen.contains(item))
+            QObject *object = entry.object;
+            if (!object || seen.contains(object))
                 continue;
-            seen.insert(item);
-            const QString qmlId = qmlIdForObject(item);
+            seen.insert(object);
+            const QString qmlId = qmlIdForObject(object);
             if (!qmlId.isEmpty())
                 ++index.idCounts[qmlId];
-            if (!item->objectName().isEmpty())
-                ++index.objectNameCounts[item->objectName()];
+            if (!object->objectName().isEmpty())
+                ++index.objectNameCounts[object->objectName()];
             // Group over every item, not just anonymous ones: a delegate
             // line repeats across instances whether or not the delegate has
             // a (delegate-local, non-unique) id, and includeSource offers
             // the source selector on those too.
-            const QString sourceSelector = sourceLocationSelectorForObject(item);
+            const QString sourceSelector = sourceLocationSelectorForObject(object);
             if (!sourceSelector.isEmpty())
-                sourceGroups[sourceSelector].append(item);
+                sourceGroups[sourceSelector].append(object);
 
             // Delegate roots establish the context; descendants inherit it,
             // matching the recursive annotation on the emission side.
             DelegateContext context = entry.context;
-            const int row = readableDelegateRow(item);
-            const int column = readableDelegateColumn(item);
-            if (row >= 0 && column >= 0 && hasTableLikeViewAncestor(item)) {
+            const int row = readableDelegateRow(object);
+            const int column = readableDelegateColumn(object);
+            if (row >= 0 && column >= 0 && hasTableLikeViewAncestor(object)) {
                 context = { row, column, -1 };
             } else {
-                const int modelIndex = readableDelegateModelIndex(item);
+                const int modelIndex = readableDelegateModelIndex(object);
                 if (modelIndex >= 0)
                     context = { -1, -1, modelIndex };
             }
             const QString stableIdKind = !qmlId.isEmpty()
                     ? QStringLiteral("id")
-                    : (!item->objectName().isEmpty() ? QStringLiteral("objectName") : QString());
-            const QString stableId = !qmlId.isEmpty() ? qmlId : item->objectName();
+                    : (!object->objectName().isEmpty()
+                       ? QStringLiteral("objectName") : QString());
+            const QString stableId = !qmlId.isEmpty() ? qmlId : object->objectName();
             if (context.row >= 0 && context.column >= 0) {
                 if (!stableIdKind.isEmpty()) {
                     ++index.delegateCompositeCounts[QStringLiteral("%1=\"%2\" row=%3 column=%4")
@@ -368,9 +509,16 @@ static SelectorUniquenessIndex buildSelectorUniquenessIndex()
                 }
             }
 
-            const QList<QQuickItem *> children = item->childItems();
-            for (QQuickItem *child : children)
-                stack.append({ child, context });
+            if (QQuickItem *item = qobject_cast<QQuickItem *>(object)) {
+                const QList<QQuickItem *> children = item->childItems();
+                for (QQuickItem *child : children)
+                    stack.append({ child, context });
+            }
+            if (quick3DTraversalAvailable()) {
+                const QList<QObject *> children = quick3DTraversalChildren(object);
+                for (QObject *child : children)
+                    stack.append({ child, context });
+            }
         }
     }
     // Assign the per-instance ordinal by sorting each group on the stable
@@ -926,6 +1074,11 @@ static QJsonObject nodeForObjectInternal(QObject *object, int windowId, int dept
     QQuickItem *item = qobject_cast<QQuickItem *>(object);
     if (item && !options.includeInvisible && !item->isVisible())
         return {};
+    const bool quick3DViewportObject = isQuick3DViewportObject(object);
+    const bool quick3DObject = quick3DTraversalAvailable() && isQuick3DObject(object);
+    const bool quick3DViewport = quick3DTraversalAvailable() && quick3DViewportObject;
+    if (quick3DObject && !options.includeInvisible && !quick3DObjectVisible(object))
+        return {};
     if (state && options.maxNodes >= 0 && state->nodeCount >= options.maxNodes) {
         ++state->omittedNodeCount;
         state->truncated = true;
@@ -946,7 +1099,11 @@ static QJsonObject nodeForObjectInternal(QObject *object, int windowId, int dept
     insertField(&node, options, QStringLiteral("nodeId"), nodeId);
     insertField(&node, options, QStringLiteral("windowId"), windowId);
     insertField(&node, options, QStringLiteral("kind"),
-                item ? QStringLiteral("QQuickItem") : QStringLiteral("QObject"));
+                item ? QStringLiteral("QQuickItem")
+                     : (quick3DObject ? QStringLiteral("QQuick3DObject")
+                                      : QStringLiteral("QObject")));
+    if (quick3DObject || quick3DViewport)
+        insertField(&node, options, QStringLiteral("sceneKind"), QStringLiteral("QtQuick3D"));
     insertField(&node, options, QStringLiteral("type"), typeName);
     // Native style renderer items register under control type names
     // (NativeStyle.CheckBox); expose the distinction as evidence (F-007).
@@ -998,6 +1155,16 @@ static QJsonObject nodeForObjectInternal(QObject *object, int windowId, int dept
                 QQmlAgentActionability::acceptsInputEvidence(object);
         if (!acceptsInput.isEmpty())
             insertField(&node, options, QStringLiteral("acceptsInput"), acceptsInput);
+    }
+    if (quick3DObject) {
+        const int visibleIndex = object->metaObject()->indexOfProperty("visible");
+        if (visibleIndex >= 0)
+            insertField(&node, options, QStringLiteral("visible"),
+                        object->property("visible").toBool());
+        const int opacityIndex = object->metaObject()->indexOfProperty("opacity");
+        if (opacityIndex >= 0)
+            insertField(&node, options, QStringLiteral("opacity"),
+                        object->property("opacity").toDouble());
     }
 
     QJsonArray selectors;
@@ -1099,26 +1266,43 @@ static QJsonObject nodeForObjectInternal(QObject *object, int windowId, int dept
             insertField(&node, options, QStringLiteral("properties"), propertyObject);
     }
 
-    if (depth != 0 && item) {
+    if (depth != 0 && (item || quick3DTraversalAvailable())) {
         QJsonArray children;
         QHash<QString, int> delegateIndexes;
         const int childDepth = depth < 0 ? -1 : depth - 1;
         int childIndex = 0;
-        for (QQuickItem *child : item->childItems()) {
-            const QString childTypeName = prettyTypeName(child);
-            const QString childVisualPath = QStringLiteral("%1/%2[%3]")
-                    .arg(nodeVisualPath, childTypeName)
-                    .arg(childIndex);
-            ++childIndex;
-            QJsonObject childNode = nodeForObjectInternal(child, windowId, childDepth, options,
-                                                          seen, state, childVisualPath);
-            if (!childNode.isEmpty()) {
-                const QString repeatKey = repeatedNodeKey(childNode);
-                const int delegateIndex = delegateIndexes.value(repeatKey, 0);
-                delegateIndexes.insert(repeatKey, delegateIndex + 1);
-                childNode = withDelegateMetadata(childNode, child, delegateIndex,
-                                                 options.uniqueness);
-                children.append(childNode);
+        if (item) {
+            for (QQuickItem *child : item->childItems()) {
+                const QString childTypeName = prettyTypeName(child);
+                const QString childVisualPath = QStringLiteral("%1/%2[%3]")
+                        .arg(nodeVisualPath, childTypeName)
+                        .arg(childIndex);
+                ++childIndex;
+                QJsonObject childNode = nodeForObjectInternal(child, windowId, childDepth, options,
+                                                              seen, state, childVisualPath);
+                if (!childNode.isEmpty()) {
+                    const QString repeatKey = repeatedNodeKey(childNode);
+                    const int delegateIndex = delegateIndexes.value(repeatKey, 0);
+                    delegateIndexes.insert(repeatKey, delegateIndex + 1);
+                    childNode = withDelegateMetadata(childNode, child, delegateIndex,
+                                                     options.uniqueness);
+                    children.append(childNode);
+                }
+            }
+        }
+        if (quick3DTraversalAvailable()) {
+            const QList<QObject *> quick3DChildren = quick3DTraversalChildren(object);
+            for (QObject *child : quick3DChildren) {
+                const QString childTypeName = prettyTypeName(child);
+                const QString childVisualPath = QStringLiteral("%1/%2[%3]")
+                        .arg(nodeVisualPath, childTypeName)
+                        .arg(childIndex);
+                ++childIndex;
+                const QJsonObject childNode =
+                        nodeForObjectInternal(child, windowId, childDepth, options, seen, state,
+                                              childVisualPath);
+                if (!childNode.isEmpty())
+                    children.append(childNode);
             }
         }
         if (options.collapseRepeated)
@@ -1229,9 +1413,9 @@ QJsonObject QQmlAgentUiTree::getTree(const QJsonObject &params)
 {
     const int depth = params.value(QStringLiteral("depth")).toInt(-1);
     TreeBuildOptions options;
-    options.uniqueness = buildSelectorUniquenessIndex();
     options.includeInvisible = params.value(QStringLiteral("includeInvisible")).toBool(false);
     options.includeSource = params.value(QStringLiteral("includeSource")).toBool(true);
+    options.uniqueness = buildSelectorUniquenessIndex();
     options.properties = propertiesFromParams(params);
     options.fields = fieldsFromParams(params);
     if (!options.properties.isEmpty() && !options.fields.isEmpty())
@@ -1597,29 +1781,47 @@ static void collectQueryMatchesFromObject(QObject *object, int windowId, const S
         }
     }
 
-    if (!item)
+    if (!item && !quick3DTraversalAvailable())
         return;
 
     QHash<QString, int> delegateIndexes;
     int childIndex = 0;
-    for (QQuickItem *child : item->childItems()) {
-        const QString childTypeName = prettyTypeName(child);
-        const QString childVisualPath = QStringLiteral("%1/%2[%3]")
-                .arg(nodeVisualPath, childTypeName)
-                .arg(childIndex);
-        ++childIndex;
+    if (item) {
+        for (QQuickItem *child : item->childItems()) {
+            const QString childTypeName = prettyTypeName(child);
+            const QString childVisualPath = QStringLiteral("%1/%2[%3]")
+                    .arg(nodeVisualPath, childTypeName)
+                    .arg(childIndex);
+            ++childIndex;
 
-        QJsonObject childMatchNode = nodeForObjectInternal(child, windowId, 0, matchOptions,
-                                                           nullptr, nullptr, childVisualPath);
-        const QString repeatKey = repeatedNodeKey(childMatchNode);
-        const int childDelegateIndex = delegateIndexes.value(repeatKey, 0);
-        delegateIndexes.insert(repeatKey, childDelegateIndex + 1);
+            QJsonObject childMatchNode = nodeForObjectInternal(child, windowId, 0, matchOptions,
+                                                               nullptr, nullptr, childVisualPath);
+            const QString repeatKey = repeatedNodeKey(childMatchNode);
+            const int childDelegateIndex = delegateIndexes.value(repeatKey, 0);
+            delegateIndexes.insert(repeatKey, childDelegateIndex + 1);
 
-        collectQueryMatchesFromObject(child, windowId, criteria, matchOptions, resultOptions,
-                                      resultDepth, maxMatches, truncated, matches, seen,
-                                      childVisualPath, childDelegateIndex, effectiveDelegateIndex,
-                                      effectiveDelegateIndexSource, effectiveDelegateRow,
-                                      effectiveDelegateColumn, effectiveDelegateCellSource);
+            collectQueryMatchesFromObject(child, windowId, criteria, matchOptions, resultOptions,
+                                          resultDepth, maxMatches, truncated, matches, seen,
+                                          childVisualPath, childDelegateIndex, effectiveDelegateIndex,
+                                          effectiveDelegateIndexSource, effectiveDelegateRow,
+                                          effectiveDelegateColumn, effectiveDelegateCellSource);
+        }
+    }
+    if (quick3DTraversalAvailable()) {
+        const QList<QObject *> quick3DChildren = quick3DTraversalChildren(object);
+        for (QObject *child : quick3DChildren) {
+            const QString childTypeName = prettyTypeName(child);
+            const QString childVisualPath = QStringLiteral("%1/%2[%3]")
+                    .arg(nodeVisualPath, childTypeName)
+                    .arg(childIndex);
+            ++childIndex;
+
+            collectQueryMatchesFromObject(child, windowId, criteria, matchOptions, resultOptions,
+                                          resultDepth, maxMatches, truncated, matches, seen,
+                                          childVisualPath, -1, effectiveDelegateIndex,
+                                          effectiveDelegateIndexSource, effectiveDelegateRow,
+                                          effectiveDelegateColumn, effectiveDelegateCellSource);
+        }
     }
 }
 

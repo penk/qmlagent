@@ -57,6 +57,8 @@ Launcher control error ids: see §5.
     "runtimeMutation":  { "enabled": bool, "verificationRole": "setup-only",
                           "configureWith": "Session.configure runtimeMutation=true" },
     "renderScreenshot": { "enabled": true, "evidenceRole": "fallback-supporting" },
+    "qtQuick3D":        { "enabled": bool, "evidenceRole": "structural-source",
+                          "methods": ["UI.getTree", "UI.query", "UI.queryMany"] },
     "payloadLimits":    { "maxInboundMessageBytes", "maxOutboundMessageBytes", "overflowBehavior" }
   }
 }
@@ -132,6 +134,8 @@ Entries: `{level: debug|info|warning|error|fatal, category, text, sourceLocation
 
 **`UI.getTree`** — params: `depth` int = -1 (unlimited), `includeInvisible` bool = false, `includeSource` bool = true, `properties` string[] (extra properties per node, dotted paths like `font.pixelSize` allowed), `fields` string[] (projection; empty = all), `maxNodes` int = -1, `collapseRepeated` bool = false (runs of ≥3 identical siblings become one `{kind:"RepeatedNodes", count, collapsed:true}` summary), `selector` string (prunes tree to matches; ancestors kept with `matchAncestor:true`).
 Result: `{windows:[{windowId, title, width, height, devicePixelRatio, window:<window node>, root:<tree>}], nodeCount, truncated?, omittedNodeCount?, nextHints?}`. Node fields include `nodeId, windowId, kind, type, typeAliases, styleItem?, objectName, qmlId?, implementationId?, visualPath, text?, enabled?, visible, opacity, bbox, insideViewport, viewport, selectors, sourceLocation?, sourceInstance?, frameworkInternal?, delegate?, properties?, children` (`actionable`/`interactable` computed only when requested via `fields`).
+
+When the QmlAgent plugin is built with `Qt6::Quick3D`, QtQuick3D frontend objects below `View3D` are included automatically. They are tagged with `kind:"QQuick3DObject"` and `sceneKind:"QtQuick3D"` when applicable. QtQuick3D nodes are structural/source evidence only: they do not have a 2D `bbox` and must not be treated as `QQuickItem` input targets.
 
 **`UI.query`** — params: `selector` (required), `includeInvisible` = false, `includeSource` = true, `properties`, `fields`, `maxNodes` = -1, `depth` = 0 (children depth of each match), `includeStyleItems` bool = false.
 Result: `{matches[], diagnostics[], truncated?, styleItemMatchesExcluded?, styleItemExclusionNote?, nextHints?}`. Behaviors: `type=` matches exclude native style items when exactly one authored control remains; matches all on one ancestor chain collapse to the outermost control; no match ⇒ `selector.not_found` with up to 20 ranked `candidateSelectors`; >1 match ⇒ `selector.ambiguous` with `matchCount`, `stableSelectorHints`, and globally-unique `indexedSelectors` suggestions.

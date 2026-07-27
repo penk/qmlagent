@@ -97,7 +97,7 @@ JSON-RPC error with narrowing hints instead of being sent.
 - `qqmlagentservicefactory.cpp` — `QQmlDebugServiceFactory` plugin entry; creates the service for key `QmlAgent`.
 - `qqmlagentservice.cpp` — service core: method table, JSON-RPC dispatch, GUI-thread marshalling, session configuration (runtime-mutation gate), UI-change subscription watchers, payload bounds.
 - `qqmlagentprotocol.cpp` — JSON-RPC 2.0 request parsing and response/event serialization; message size limits.
-- `qqmlagentuitree.cpp` — UI tree snapshots, selector resolution (`UI.query`/`queryMany`/`waitFor`/`describeNode`/`getBoxModel`), nodeId handles, selector stability labels and hints.
+- `qqmlagentuitree.cpp` — UI tree snapshots, selector resolution (`UI.query`/`queryMany`/`waitFor`/`describeNode`/`getBoxModel`), nodeId handles, selector stability labels and hints, plus automatic QtQuick3D frontend-object reachability when the plugin is built with `Qt6::Quick3D`.
 - `qqmlagentdiagnostics.cpp` — layout/visibility diagnostics for a node or tree and `Diagnostics.analyzeBinding`, with evidence provenance.
 - `qqmlagentsourceresolver.cpp` — maps runtime objects back to QML source locations, fallback locations, and bounded source snippets.
 - `qqmlagentactionability.cpp` — actionability evidence: why a node is or is not clickable (visibility, enablement, occlusion, viewport) with reasons and limitations.

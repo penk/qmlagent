@@ -33,6 +33,11 @@ target_link_libraries(QQmlAgentServiceFactoryPlugin PRIVATE
     Qt6::QuickTemplates2Private
 )
 
+if(TARGET Qt6::Quick3D)
+    target_compile_definitions(QQmlAgentServiceFactoryPlugin PRIVATE QMLAGENT_HAS_QUICK3D)
+    target_link_libraries(QQmlAgentServiceFactoryPlugin PRIVATE Qt6::Quick3D)
+endif()
+
 set(qmlagent_build_plugin_dir "${CMAKE_BINARY_DIR}/plugins/qmltooling")
 set_target_properties(QQmlAgentServiceFactoryPlugin PROPERTIES
     LIBRARY_OUTPUT_DIRECTORY "${qmlagent_build_plugin_dir}"

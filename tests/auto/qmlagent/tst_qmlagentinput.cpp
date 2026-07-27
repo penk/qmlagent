@@ -14,10 +14,14 @@
 #include <QtCore/qjsonobject.h>
 #include <QtCore/qlogging.h>
 #include <QtCore/qobject.h>
+#include <QtCore/qscopedpointer.h>
+#include <QtCore/qurl.h>
 #include <QtCore/qtimer.h>
 #include <QtQuick/qquickitem.h>
 #include <QtQuick/qquickwindow.h>
 #include <QtQuick/private/qquickflickable_p.h>
+#include <QtQml/qqmlcomponent.h>
+#include <QtQml/qqmlengine.h>
 #include <QtTest/qtest.h>
 
 QT_USE_NAMESPACE
@@ -42,6 +46,10 @@ private slots:
     void selectorStabilityReflectsTreeUniqueness();
     void queryManyAlignsResultsAndAppliesDefaults();
     void windowObjectIsAddressable();
+#ifdef QMLAGENT_HAS_QUICK3D
+    void quick3DReachabilityIsAutomatic();
+    void quick3DView3DIncludesSceneChildrenAutomatically();
+#endif
     void scrollIntoViewAdjustsAncestorFlickable();
     void dismissPopupReportsNoVisiblePopup();
 };
@@ -373,6 +381,26 @@ static QString objectNameSelectorStability(const QJsonObject &tree, const QStrin
     return {};
 }
 
+static QJsonObject nodeByObjectName(const QJsonObject &tree, const QString &objectName)
+{
+    QList<QJsonObject> stack;
+    const QJsonArray windows = tree.value(QStringLiteral("windows")).toArray();
+    for (const QJsonValue &window : windows) {
+        const QJsonObject windowObject = window.toObject();
+        stack.append(windowObject.value(QStringLiteral("root")).toObject());
+        stack.append(windowObject.value(QStringLiteral("window")).toObject());
+    }
+    while (!stack.isEmpty()) {
+        const QJsonObject node = stack.takeLast();
+        if (node.value(QStringLiteral("objectName")).toString() == objectName)
+            return node;
+        const QJsonArray children = node.value(QStringLiteral("children")).toArray();
+        for (const QJsonValue &child : children)
+            stack.append(child.toObject());
+    }
+    return {};
+}
+
 void tst_QQmlAgentInput::selectorStabilityReflectsTreeUniqueness()
 {
     QQuickWindow window;
@@ -487,6 +515,224 @@ void tst_QQmlAgentInput::windowObjectIsAddressable()
                      .value(QStringLiteral("title")).toString(),
              QStringLiteral("Eval Window"));
 }
+
+#ifdef QMLAGENT_HAS_QUICK3D
+static bool jsonArrayContainsString(const QJsonArray &array, const QString &needle)
+{
+    for (const QJsonValue &value : array) {
+        if (value.toString() == needle)
+            return true;
+    }
+    return false;
+}
+
+static bool selectorArrayContainsTypeValue(const QJsonArray &selectors, const QString &value)
+{
+    for (const QJsonValue &selectorValue : selectors) {
+        const QJsonObject selector = selectorValue.toObject();
+        if (selector.value(QStringLiteral("kind")).toString() == QLatin1String("type")
+                && selector.value(QStringLiteral("value")).toString() == value) {
+            return true;
+        }
+    }
+    return false;
+}
+
+void tst_QQmlAgentInput::quick3DReachabilityIsAutomatic()
+{
+    QQmlEngine engine;
+    QQmlComponent component(&engine);
+    component.setData(R"(
+import QtQuick
+import QtQuick.Window
+import QtQuick3D
+
+Window {
+    width: 320
+    height: 240
+    visible: false
+
+    View3D {
+        id: view
+        anchors.fill: parent
+
+        PerspectiveCamera {
+            id: camera
+            z: 600
+        }
+
+        DirectionalLight {
+            id: keyLight
+            brightness: 1.5
+        }
+
+        Model {
+            id: cube
+            objectName: "quick3d.probe.cube"
+            source: "#Cube"
+            scale: Qt.vector3d(1.8, 1.8, 1.8)
+            materials: PrincipledMaterial {
+                id: cubeMaterial
+                baseColor: "#41cd52"
+            }
+        }
+    }
+}
+)",
+                      QUrl(QStringLiteral("file:///tmp/Quick3DReachability.qml")));
+
+    QScopedPointer<QObject> root(component.create());
+    QVERIFY2(root, qPrintable(component.errorString()));
+    QVERIFY(qobject_cast<QQuickWindow *>(root.data()));
+
+    const QJsonObject queried = QQmlAgentUiTree::query({
+        { QStringLiteral("selector"), QStringLiteral("objectName=\"quick3d.probe.cube\"") },
+        { QStringLiteral("includeInvisible"), true },
+        { QStringLiteral("includeSource"), true },
+        { QStringLiteral("fields"), QJsonArray{
+            QStringLiteral("nodeId"),
+            QStringLiteral("kind"),
+            QStringLiteral("sceneKind"),
+            QStringLiteral("type"),
+            QStringLiteral("typeAliases"),
+            QStringLiteral("qmlId"),
+            QStringLiteral("objectName"),
+            QStringLiteral("sourceLocation"),
+            QStringLiteral("selectors"),
+            QStringLiteral("properties"),
+        } },
+        { QStringLiteral("properties"), QJsonArray{
+            QStringLiteral("source"),
+            QStringLiteral("scale"),
+        } },
+    });
+    const QJsonArray matches = queried.value(QStringLiteral("matches")).toArray();
+    QCOMPARE(matches.size(), 1);
+    const QJsonObject model = matches.at(0).toObject();
+    QCOMPARE(model.value(QStringLiteral("kind")).toString(), QStringLiteral("QQuick3DObject"));
+    QCOMPARE(model.value(QStringLiteral("sceneKind")).toString(), QStringLiteral("QtQuick3D"));
+    QCOMPARE(model.value(QStringLiteral("type")).toString(), QStringLiteral("Model"));
+    const QJsonArray typeAliases = model.value(QStringLiteral("typeAliases")).toArray();
+    QVERIFY(!jsonArrayContainsString(typeAliases, QStringLiteral("3DModel")));
+    const QJsonArray selectors = model.value(QStringLiteral("selectors")).toArray();
+    QVERIFY(selectorArrayContainsTypeValue(selectors, QStringLiteral("Model")));
+    QVERIFY(!selectorArrayContainsTypeValue(selectors, QStringLiteral("3DModel")));
+    QCOMPARE(model.value(QStringLiteral("qmlId")).toString(), QStringLiteral("cube"));
+    QCOMPARE(model.value(QStringLiteral("objectName")).toString(),
+             QStringLiteral("quick3d.probe.cube"));
+    QCOMPARE(model.value(QStringLiteral("properties")).toObject()
+                     .value(QStringLiteral("source")).toString(),
+             QStringLiteral("#Cube"));
+
+    const QJsonObject sourceLocation = model.value(QStringLiteral("sourceLocation")).toObject();
+    QCOMPARE(sourceLocation.value(QStringLiteral("method")).toString(),
+             QStringLiteral("qqmldata-direct"));
+    QVERIFY(sourceLocation.value(QStringLiteral("file")).toString()
+                    .endsWith(QStringLiteral("Quick3DReachability.qml")));
+    QVERIFY(sourceLocation.value(QStringLiteral("line")).toInt() > 0);
+
+    const QJsonObject camera = QQmlAgentUiTree::query({
+        { QStringLiteral("selector"), QStringLiteral("id=\"camera\"") },
+        { QStringLiteral("includeInvisible"), true },
+        { QStringLiteral("fields"), QJsonArray{ QStringLiteral("type"), QStringLiteral("kind") } },
+    });
+    QCOMPARE(camera.value(QStringLiteral("matches")).toArray().size(), 1);
+    QCOMPARE(camera.value(QStringLiteral("matches")).toArray().at(0).toObject()
+                     .value(QStringLiteral("type")).toString(),
+             QStringLiteral("PerspectiveCamera"));
+}
+
+void tst_QQmlAgentInput::quick3DView3DIncludesSceneChildrenAutomatically()
+{
+    QQmlEngine engine;
+    QQmlComponent sceneComponent(&engine);
+    sceneComponent.setData(R"(
+import QtQuick
+import QtQuick.Window
+import QtQuick3D
+
+Window {
+    width: 320
+    height: 240
+    visible: false
+
+    View3D {
+        id: viewWithScene
+        objectName: "quick3d.view.withScene"
+        anchors.fill: parent
+
+        Model {
+            id: cube
+            objectName: "quick3d.nudge.cube"
+            source: "#Cube"
+        }
+    }
+}
+)",
+                           QUrl(QStringLiteral("file:///tmp/Quick3DNudge.qml")));
+    QScopedPointer<QObject> sceneRoot(sceneComponent.create());
+    QVERIFY2(sceneRoot, qPrintable(sceneComponent.errorString()));
+
+    const QJsonObject sceneTree = QQmlAgentUiTree::getTree({
+        { QStringLiteral("depth"), -1 },
+        { QStringLiteral("includeInvisible"), true },
+        { QStringLiteral("fields"), QJsonArray{
+            QStringLiteral("objectName"),
+            QStringLiteral("kind"),
+            QStringLiteral("sceneKind"),
+            QStringLiteral("type"),
+            QStringLiteral("children"),
+        } },
+    });
+    const QJsonObject viewNode = nodeByObjectName(sceneTree,
+                                                  QStringLiteral("quick3d.view.withScene"));
+    QVERIFY(!viewNode.isEmpty());
+    QCOMPARE(viewNode.value(QStringLiteral("type")).toString(), QStringLiteral("View3D"));
+    QCOMPARE(viewNode.value(QStringLiteral("sceneKind")).toString(), QStringLiteral("QtQuick3D"));
+    const QJsonObject cubeNode = nodeByObjectName(sceneTree, QStringLiteral("quick3d.nudge.cube"));
+    QVERIFY(!cubeNode.isEmpty());
+    QCOMPARE(cubeNode.value(QStringLiteral("kind")).toString(), QStringLiteral("QQuick3DObject"));
+    QCOMPARE(cubeNode.value(QStringLiteral("sceneKind")).toString(), QStringLiteral("QtQuick3D"));
+
+    QQmlComponent emptyComponent(&engine);
+    emptyComponent.setData(R"(
+import QtQuick
+import QtQuick.Window
+import QtQuick3D
+
+Window {
+    width: 320
+    height: 240
+    visible: false
+
+    View3D {
+        objectName: "quick3d.view.empty"
+        anchors.fill: parent
+    }
+}
+)",
+                           QUrl(QStringLiteral("file:///tmp/Quick3DNoNudge.qml")));
+    QScopedPointer<QObject> emptyRoot(emptyComponent.create());
+    QVERIFY2(emptyRoot, qPrintable(emptyComponent.errorString()));
+
+    const QJsonObject emptyTree = QQmlAgentUiTree::getTree({
+        { QStringLiteral("depth"), -1 },
+        { QStringLiteral("includeInvisible"), true },
+        { QStringLiteral("fields"), QJsonArray{
+            QStringLiteral("objectName"),
+            QStringLiteral("kind"),
+            QStringLiteral("sceneKind"),
+            QStringLiteral("type"),
+            QStringLiteral("children"),
+        } },
+    });
+    const QJsonObject emptyNode = nodeByObjectName(emptyTree,
+                                                   QStringLiteral("quick3d.view.empty"));
+    QVERIFY(!emptyNode.isEmpty());
+    QCOMPARE(emptyNode.value(QStringLiteral("type")).toString(), QStringLiteral("View3D"));
+    QCOMPARE(emptyNode.value(QStringLiteral("sceneKind")).toString(), QStringLiteral("QtQuick3D"));
+}
+#endif
 
 void tst_QQmlAgentInput::scrollIntoViewAdjustsAncestorFlickable()
 {

@@ -244,6 +244,7 @@ Use `qmlagentctl` when MCP is unavailable or a shell command is simpler:
 "$QT_BIN/qmlagentctl" status --format compact
 "$QT_BIN/qmlagentctl" methods
 "$QT_BIN/qmlagentctl" query 'id="saveButton"' --property text --format compact
+"$QT_BIN/qmlagentctl" query 'objectName="probe.cube"' --format compact
 "$QT_BIN/qmlagentctl" query-many --params '{"queries":[{"selector":"id=\"saveButton\""},{"selector":"id=\"statusLabel\"","properties":["text"]}]}' --format compact
 "$QT_BIN/qmlagentctl" wait 'id="detailsPopup"' --state found --timeout 1000
 "$QT_BIN/qmlagentctl" click 'id="saveButton"'

@@ -988,9 +988,11 @@ static void printMethodsHelp(const QStringList &methods, const QString &origin,
     stream << "\nHigh-leverage methods for agent loops:\n"
            << "  UI.queryMany             batch several selector/property reads\n"
            << "  Input.scrollIntoView     recover from center_outside_viewport on clipped content\n"
+           << "  UI.getTree / UI.query    include QtQuick3D View3D scene nodes automatically when capabilities.qtQuick3D.enabled is true\n"
            << "\nMCP/tool equivalents:\n"
            << "  qmlagent_ui_query_many\n"
-           << "  qmlagent_input_scroll_into_view\n";
+           << "  qmlagent_input_scroll_into_view\n"
+           << "  qmlagent_ui_get_tree / qmlagent_ui_query for QtQuick3D structural/source evidence\n";
 }
 
 static int runCtlSubcommand(const QStringList &arguments)
@@ -1018,6 +1020,9 @@ static int runCtlSubcommand(const QStringList &arguments)
                 << "  qmlagentctl reload-preview\n"
                 << "  qmlagentctl stop\n"
                 << "  qmlagentctl call <Method.Name> --params '{...}'\n\n"
+                << "QtQuick3D: when capabilities.qtQuick3D.enabled is true, UI.getTree and\n"
+                << "UI.query include View3D scene frontend nodes automatically. These nodes\n"
+                << "are structural/source evidence, not QQuickItem click targets.\n\n"
                 << "Screenshot is fallback visual evidence. Use structural UI,\n"
                 << "diagnostics, source, log, and input/workflow evidence first;\n"
                 << "--include-data is opt-in to preserve agent context.\n"
@@ -1198,6 +1203,8 @@ static int runCtlSubcommand(const QStringList &arguments)
                 params.insert(QStringLiteral("fields"), QJsonArray{
                     QStringLiteral("qmlId"),
                     QStringLiteral("objectName"),
+                    QStringLiteral("kind"),
+                    QStringLiteral("sceneKind"),
                     QStringLiteral("properties"),
                 });
         } else if (command == QLatin1String("binding")) {
@@ -1710,6 +1717,8 @@ private:
                 QStringLiteral("nodeId"),
                 QStringLiteral("qmlId"),
                 QStringLiteral("objectName"),
+                QStringLiteral("kind"),
+                QStringLiteral("sceneKind"),
                 QStringLiteral("type"),
                 QStringLiteral("text"),
                 QStringLiteral("bbox"),
@@ -1738,6 +1747,8 @@ private:
                 QStringLiteral("nodeId"),
                 QStringLiteral("qmlId"),
                 QStringLiteral("objectName"),
+                QStringLiteral("kind"),
+                QStringLiteral("sceneKind"),
                 QStringLiteral("type"),
                 QStringLiteral("text"),
                 QStringLiteral("bbox"),
@@ -2472,6 +2483,8 @@ private:
             { QStringLiteral("batchVerificationReads"),
               QStringLiteral("qmlagent_ui_query_many") },
             { QStringLiteral("tree"), QStringLiteral("qmlagent_ui_get_tree") },
+            { QStringLiteral("qtQuick3D"),
+              QStringLiteral("When target capabilities.qtQuick3D.enabled is true, qmlagent_ui_get_tree and qmlagent_ui_query include View3D scene Model/camera/light/material frontend nodes automatically; use them as structural/source evidence, not click targets.") },
             { QStringLiteral("click"), QStringLiteral("qmlagent_input_click") },
             { QStringLiteral("longPress"), QStringLiteral("qmlagent_input_long_press") },
             { QStringLiteral("dragSliderHandleSwipe"),

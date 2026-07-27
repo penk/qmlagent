@@ -125,6 +125,13 @@ Use compact or summary output by default. Ask for fuller evidence only when the
 summary says fields were omitted or when patching needs deeper source/runtime
 facts.
 
+When QmlAgent is built with `Qt6::Quick3D`, `qmlagent_ui_get_tree` and
+`qmlagent_ui_query` include QtQuick3D frontend nodes below `View3D`
+automatically. Use normal selectors (`id=`, `objectName=`, `sourceLocation=`)
+for `Model`, camera, light, material, texture, and related nodes. These nodes
+are structural/source evidence, not `QQuickItem` click targets; 2D input
+correlation requires a future picking or projection bridge.
+
 On an input result, `delivered:true` is the action-success signal. The nested
 `settle` object is render-loop-only (`verificationRole: render-loop-settle-only`):
 `settle.ok:false` with `frame_not_observed_before_timeout` just means the click
@@ -142,6 +149,7 @@ available:
 "$QT_BIN/qmlagentctl" status --format compact
 "$QT_BIN/qmlagentctl" methods
 "$QT_BIN/qmlagentctl" query 'id="saveButton"' --property text --format compact
+"$QT_BIN/qmlagentctl" query 'objectName="probe.cube"' --format compact
 "$QT_BIN/qmlagentctl" query-many --params '{"queries":[{"selector":"id=\"saveButton\""},{"selector":"id=\"statusLabel\"","properties":["text"]}]}' --format compact
 "$QT_BIN/qmlagentctl" wait 'id="detailsPopup"' --state found --timeout 1000
 "$QT_BIN/qmlagentctl" click 'id="saveButton"'

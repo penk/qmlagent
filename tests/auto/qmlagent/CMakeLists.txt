@@ -72,6 +72,11 @@ target_link_libraries(tst_qmlagentinput PRIVATE
     Qt6::Test
 )
 
+if(TARGET Qt6::Quick3D)
+    target_compile_definitions(tst_qmlagentinput PRIVATE QMLAGENT_HAS_QUICK3D)
+    target_link_libraries(tst_qmlagentinput PRIVATE Qt6::Quick3D)
+endif()
+
 add_test(NAME qmlagentinput
     COMMAND tst_qmlagentinput
 )
