@@ -213,19 +213,35 @@ QJsonArray toolList()
                  } },
              }, { QStringLiteral("selector"), QStringLiteral("until") })),
         tool(QStringLiteral("qmlagent_render_pick3d"),
-             QStringLiteral("Read-only QtQuick3D View3D hit test at a View3D-local logical-pixel coordinate. Use after UI.query fields=[\"render3D\"] when you need to connect screen-space evidence to a Model selector. This does not deliver input events and 3D Model nodes remain non-QQuickItem click targets."),
+             QStringLiteral("Read-only QtQuick3D View3D hit test at a logical-pixel coordinate. coordinateSpace defaults to auto: try View3D-local first, then window coordinates when the point lies inside the View3D. Pass modelSelector to use View3D.pick(x,y,model) for targeted Model evidence. Use after UI.query fields=[\"render3D\"] when you need to connect screen-space evidence to a Model selector. This does not deliver input events and 3D Model nodes remain non-QQuickItem click targets."),
              schema({
                  { QStringLiteral("selector"), QJsonObject{
                      { QStringLiteral("type"), QStringLiteral("string") },
                      { QStringLiteral("description"), QStringLiteral("Selector for the View3D node to pick within.") },
                  } },
+                 { QStringLiteral("modelSelector"), QJsonObject{
+                     { QStringLiteral("type"), QStringLiteral("string") },
+                     { QStringLiteral("description"), QStringLiteral("Optional selector for a QtQuick3D Model. When present, QmlAgent invokes the targeted View3D.pick(x,y,model) overload.") },
+                 } },
                  { QStringLiteral("x"), QJsonObject{
                      { QStringLiteral("type"), QStringLiteral("number") },
-                     { QStringLiteral("description"), QStringLiteral("X coordinate in View3D-local logical pixels.") },
+                     { QStringLiteral("description"), QStringLiteral("X coordinate in the selected coordinateSpace.") },
                  } },
                  { QStringLiteral("y"), QJsonObject{
                      { QStringLiteral("type"), QStringLiteral("number") },
-                     { QStringLiteral("description"), QStringLiteral("Y coordinate in View3D-local logical pixels.") },
+                     { QStringLiteral("description"), QStringLiteral("Y coordinate in the selected coordinateSpace.") },
+                 } },
+                 { QStringLiteral("coordinateSpace"), QJsonObject{
+                     { QStringLiteral("type"), QStringLiteral("string") },
+                     { QStringLiteral("default"), QStringLiteral("auto") },
+                     { QStringLiteral("enum"), QJsonArray{
+                         QStringLiteral("auto"),
+                         QStringLiteral("local"),
+                         QStringLiteral("view3d-local-logical-pixels"),
+                         QStringLiteral("window"),
+                         QStringLiteral("window-logical-pixels"),
+                     } },
+                     { QStringLiteral("description"), QStringLiteral("Coordinate interpretation. auto tries local first and falls back to window logical pixels if the point is inside the View3D.") },
                  } },
              }, { QStringLiteral("selector"), QStringLiteral("x"), QStringLiteral("y") })),
         tool(QStringLiteral("qmlagent_ui_subscribe"),
@@ -237,6 +253,7 @@ QJsonArray toolList()
         tool(QStringLiteral("qmlagent_diagnostics_analyze_tree"),
              QStringLiteral("Analyze the runtime tree for structured layout/input/log issues. Defaults to application repair scope. Use verbosity:\"summary\" for bounded agent-loop output; use evidence/full only when patch-ready detail is needed. When capabilities.qtQuick3D.enabled is true, pass checks:[\"quick3D\"] to focus on View3D camera/light setup, Model material/scale, texture source, and render3D-backed frustum evidence. Pass includeFrameworkIssues:true or issueScope:\"all\" when developing Qt Quick Controls/framework internals."),
              schema({
+                 { QStringLiteral("checks"), stringArray },
                  { QStringLiteral("includeInvisible"), QJsonObject{ { QStringLiteral("type"), QStringLiteral("boolean") } } },
                  { QStringLiteral("includeFrameworkIssues"), QJsonObject{ { QStringLiteral("type"), QStringLiteral("boolean") } } },
                  { QStringLiteral("maxIssues"), QJsonObject{ { QStringLiteral("type"), QStringLiteral("integer") } } },

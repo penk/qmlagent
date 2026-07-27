@@ -13,6 +13,7 @@
 #include <QtGui/qguiapplication.h>
 #include <QtGui/qimage.h>
 #include <QtGui/qwindow.h>
+#include <QtQuick/qquickitem.h>
 #include <QtQuick/qquickwindow.h>
 
 QT_BEGIN_NAMESPACE
@@ -82,6 +83,11 @@ static QJsonObject pick3DFailure(const QString &reason, const QString &diagnosti
 static bool isQuick3DViewportObject(QObject *object)
 {
     return object && object->inherits("QQuick3DViewport");
+}
+
+static bool isQuick3DModelObject(QObject *object)
+{
+    return object && object->inherits("QQuick3DModel");
 }
 
 static QString hitTypeName(int hitType)
@@ -157,6 +163,60 @@ static QJsonObject pickResultValue(const QMetaType &pickType, const void *pickRe
     }
 
     return result;
+}
+
+static QJsonObject pointObject(const QPointF &point)
+{
+    return {
+        { QStringLiteral("x"), point.x() },
+        { QStringLiteral("y"), point.y() },
+    };
+}
+
+static QRectF itemRectInWindow(QQuickItem *item)
+{
+    if (!item)
+        return {};
+    return QRectF(item->mapToScene(QPointF(0, 0)), QSizeF(item->width(), item->height()));
+}
+
+struct PickInvocation
+{
+    bool invoked = false;
+    QJsonObject pick;
+};
+
+static PickInvocation invokePick(QObject *viewport, const QMetaMethod &method,
+                                 const QMetaType &pickType, const QPointF &localPoint,
+                                 int windowId, QObject *modelObject = nullptr)
+{
+    void *storage = pickType.create();
+    if (!storage)
+        return {};
+
+    const float x = float(localPoint.x());
+    const float y = float(localPoint.y());
+    const char *returnTypeName = method.typeName();
+    if (!returnTypeName || !returnTypeName[0])
+        returnTypeName = pickType.name();
+    bool invoked = false;
+    if (modelObject) {
+        invoked = method.invoke(viewport,
+                                Qt::DirectConnection,
+                                QGenericReturnArgument(returnTypeName, storage),
+                                QGenericArgument("float", &x),
+                                QGenericArgument("float", &y),
+                                QGenericArgument("QQuick3DModel*", &modelObject));
+    } else {
+        invoked = method.invoke(viewport,
+                                Qt::DirectConnection,
+                                QGenericReturnArgument(returnTypeName, storage),
+                                QGenericArgument("float", &x),
+                                QGenericArgument("float", &y));
+    }
+    QJsonObject pick = invoked ? pickResultValue(pickType, storage, windowId) : QJsonObject{};
+    pickType.destroy(storage);
+    return { invoked, pick };
 }
 
 QJsonObject QQmlAgentRender::captureScreenshot(const QJsonObject &params)
@@ -297,12 +357,64 @@ QJsonObject QQmlAgentRender::pick3D(const QJsonObject &params)
                              target);
     }
 
+    const bool hasModelSelector = params.contains(QStringLiteral("modelSelector"))
+            && !params.value(QStringLiteral("modelSelector")).toString().isEmpty();
+    const bool hasModelNodeId = params.contains(QStringLiteral("modelNodeId"))
+            && !params.value(QStringLiteral("modelNodeId")).isUndefined()
+            && !params.value(QStringLiteral("modelNodeId")).isNull();
+    QObject *modelObject = nullptr;
+    QJsonObject modelTarget;
+    if (hasModelSelector || hasModelNodeId) {
+        if (hasModelSelector == hasModelNodeId) {
+            return pick3DFailure(QStringLiteral("invalid_model_noderef"),
+                                 QStringLiteral("render.pick3d_invalid_model_noderef"),
+                                 QStringLiteral("Provide exactly one of modelSelector or modelNodeId."),
+                                 target);
+        }
+
+        QJsonObject modelParams;
+        if (hasModelSelector)
+            modelParams.insert(QStringLiteral("selector"), params.value(QStringLiteral("modelSelector")));
+        else
+            modelParams.insert(QStringLiteral("nodeId"), params.value(QStringLiteral("modelNodeId")));
+        const QQmlAgentUiTree::NodeRef modelRef = QQmlAgentUiTree::resolveNodeRef(modelParams);
+        modelTarget = {
+            { QStringLiteral("selector"), params.value(QStringLiteral("modelSelector")) },
+            { QStringLiteral("nodeId"), modelRef.nodeId },
+        };
+        if (!modelRef.node.isEmpty())
+            modelTarget.insert(QStringLiteral("node"), modelRef.node);
+        if (!modelRef.issues.isEmpty()) {
+            QJsonObject failure = pick3DFailure(
+                    QStringLiteral("model_not_found"),
+                    QStringLiteral("render.pick3d_model_not_found"),
+                    QStringLiteral("Render.pick3D modelSelector/modelNodeId did not resolve to exactly one live node."),
+                    target);
+            failure.insert(QStringLiteral("modelTarget"), modelTarget);
+            return failure;
+        }
+        if (!isQuick3DModelObject(modelRef.object)) {
+            QJsonObject failure = pick3DFailure(
+                    QStringLiteral("model_target_not_model"),
+                    QStringLiteral("render.pick3d_model_target_not_model"),
+                    QStringLiteral("Render.pick3D modelSelector/modelNodeId must resolve to a QtQuick3D Model."),
+                    target);
+            failure.insert(QStringLiteral("modelTarget"), modelTarget);
+            return failure;
+        }
+        modelObject = modelRef.object;
+    }
+
     const QMetaObject *metaObject = ref.object->metaObject();
-    const int methodIndex = metaObject->indexOfMethod("pick(float,float)");
+    const int methodIndex = modelObject
+            ? metaObject->indexOfMethod("pick(float,float,QQuick3DModel*)")
+            : metaObject->indexOfMethod("pick(float,float)");
     if (methodIndex < 0) {
         return pick3DFailure(QStringLiteral("pick_method_unavailable"),
                              QStringLiteral("render.pick3d_method_unavailable"),
-                             QStringLiteral("The target View3D does not expose pick(float,float)."),
+                             modelObject
+                                     ? QStringLiteral("The target View3D does not expose pick(float,float,QQuick3DModel*).")
+                                     : QStringLiteral("The target View3D does not expose pick(float,float)."),
                              target);
     }
 
@@ -321,19 +433,78 @@ QJsonObject QQmlAgentRender::pick3D(const QJsonObject &params)
                              QStringLiteral("Could not allocate QQuick3DPickResult storage."),
                              target);
     }
+    pickType.destroy(storage);
 
     const QMetaMethod method = metaObject->method(methodIndex);
-    const float x = float(xValue.toDouble());
-    const float y = float(yValue.toDouble());
-    const bool invoked = method.invoke(ref.object,
-                                       Qt::DirectConnection,
-                                       QGenericReturnArgument(pickType.name(), storage),
-                                       QGenericArgument("float", &x),
-                                       QGenericArgument("float", &y));
-    QJsonObject pick = invoked ? pickResultValue(pickType, storage,
-                                                 ref.node.value(QStringLiteral("windowId")).toInt(-1))
-                               : QJsonObject{};
-    pickType.destroy(storage);
+    const int windowId = ref.node.value(QStringLiteral("windowId")).toInt(-1);
+    const QPointF requestedPoint(xValue.toDouble(), yValue.toDouble());
+    QQuickItem *viewportItem = qobject_cast<QQuickItem *>(ref.object);
+    if (viewportItem && !viewportItem->window()) {
+        return pick3DFailure(QStringLiteral("viewport_not_in_window"),
+                             QStringLiteral("render.pick3d_viewport_not_in_window"),
+                             QStringLiteral("Render.pick3D target View3D is not attached to a window."),
+                             target);
+    }
+
+    const QString requestedCoordinateSpace =
+            params.value(QStringLiteral("coordinateSpace")).toString(QStringLiteral("auto"));
+    const bool windowOnly = requestedCoordinateSpace == QLatin1String("window")
+            || requestedCoordinateSpace == QLatin1String("window-logical-pixels");
+    const bool localOnly = requestedCoordinateSpace == QLatin1String("local")
+            || requestedCoordinateSpace == QLatin1String("view3d-local-logical-pixels");
+    if (!windowOnly && !localOnly && requestedCoordinateSpace != QLatin1String("auto")) {
+        return pick3DFailure(QStringLiteral("invalid_coordinate_space"),
+                             QStringLiteral("render.pick3d_invalid_coordinate_space"),
+                             QStringLiteral("Render.pick3D coordinateSpace must be auto, local, view3d-local-logical-pixels, window, or window-logical-pixels."),
+                             target);
+    }
+
+    const QRectF viewportWindowRect = itemRectInWindow(viewportItem);
+    QJsonArray attempts;
+    QJsonObject pick;
+    bool invoked = false;
+    bool selectedHit = false;
+    QString usedCoordinateSpace;
+    QPointF usedLocalPoint;
+
+    auto appendAttempt = [&](const QString &coordinateSpace, const QPointF &localPoint,
+                             const QString &reason = QString()) {
+        const PickInvocation attempt = invokePick(ref.object, method, pickType, localPoint,
+                                                  windowId, modelObject);
+        QJsonObject attemptObject{
+            { QStringLiteral("coordinateSpace"), coordinateSpace },
+            { QStringLiteral("localPoint"), pointObject(localPoint) },
+            { QStringLiteral("invoked"), attempt.invoked },
+            { QStringLiteral("method"), QString::fromLatin1(method.methodSignature()) },
+        };
+        if (!reason.isEmpty())
+            attemptObject.insert(QStringLiteral("reason"), reason);
+        if (attempt.invoked)
+            attemptObject.insert(QStringLiteral("hit"), attempt.pick.value(QStringLiteral("hit")).toBool(false));
+        attempts.append(attemptObject);
+        if (!invoked)
+            invoked = attempt.invoked;
+        const bool attemptHit = attempt.pick.value(QStringLiteral("hit")).toBool(false);
+        if (attempt.invoked && (pick.isEmpty() || (!selectedHit && attemptHit))) {
+            pick = attempt.pick;
+            usedCoordinateSpace = coordinateSpace;
+            usedLocalPoint = localPoint;
+            selectedHit = attemptHit;
+        }
+    };
+
+    if (windowOnly) {
+        appendAttempt(QStringLiteral("window-logical-pixels"),
+                      requestedPoint - viewportWindowRect.topLeft());
+    } else {
+        appendAttempt(QStringLiteral("view3d-local-logical-pixels"), requestedPoint);
+        if (!localOnly && !pick.value(QStringLiteral("hit")).toBool(false)
+                && viewportItem && viewportWindowRect.contains(requestedPoint)) {
+            appendAttempt(QStringLiteral("window-logical-pixels"),
+                          requestedPoint - viewportWindowRect.topLeft(),
+                          QStringLiteral("local_point_missed_and_window_point_was_inside_view3d"));
+        }
+    }
 
     if (!invoked) {
         return pick3DFailure(QStringLiteral("pick_invocation_failed"),
@@ -342,23 +513,36 @@ QJsonObject QQmlAgentRender::pick3D(const QJsonObject &params)
                              target);
     }
 
-    return {
+    QJsonObject result{
         { QStringLiteral("ok"), true },
         { QStringLiteral("hit"), pick.value(QStringLiteral("hit")).toBool(false) },
         { QStringLiteral("mode"), QStringLiteral("read-only") },
         { QStringLiteral("evidenceRole"), QStringLiteral("3d-pick") },
-        { QStringLiteral("coordinateSpace"), QStringLiteral("view3d-local-logical-pixels") },
+        { QStringLiteral("method"), QString::fromLatin1(method.methodSignature()) },
+        { QStringLiteral("targetedModel"), bool(modelObject) },
+        { QStringLiteral("coordinateSpace"), usedCoordinateSpace },
+        { QStringLiteral("requestedCoordinateSpace"), requestedCoordinateSpace },
         { QStringLiteral("point"), QJsonObject{
             { QStringLiteral("x"), xValue.toDouble() },
             { QStringLiteral("y"), yValue.toDouble() },
         } },
+        { QStringLiteral("localPoint"), pointObject(usedLocalPoint) },
+        { QStringLiteral("viewportWindowBounds"), QJsonArray{
+            viewportWindowRect.x(), viewportWindowRect.y(),
+            viewportWindowRect.width(), viewportWindowRect.height(),
+        } },
+        { QStringLiteral("attempts"), attempts },
         { QStringLiteral("target"), target },
         { QStringLiteral("pick"), pick },
         { QStringLiteral("limitations"), QJsonArray{
             QStringLiteral("picking reports Quick3D hit-test evidence only; it does not deliver input events"),
             QStringLiteral("a miss can mean no model under the point, non-pickable content, or an unrendered/offscreen scene"),
+            QStringLiteral("coordinateSpace:auto first tries View3D-local logical pixels, then window logical pixels if that point lies inside the View3D"),
         } },
     };
+    if (!modelTarget.isEmpty())
+        result.insert(QStringLiteral("modelTarget"), modelTarget);
+    return result;
 }
 
 QT_END_NAMESPACE

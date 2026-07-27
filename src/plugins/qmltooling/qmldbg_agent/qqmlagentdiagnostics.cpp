@@ -1256,6 +1256,31 @@ static void appendQuick3DNodeDiagnostics(QObject *object, int nodeId,
     }
 
     if (isQuick3DModelObject(object)) {
+        const QVariant modelSource = object->property("source");
+        if (modelSource.canConvert<QString>() && modelSource.toString().isEmpty()) {
+            QJsonObject sourceIssue = issue(
+                    QStringLiteral("quick3d.model_missing_source"), QStringLiteral("error"),
+                    0.90, nodeId,
+                    QStringLiteral("Quick3D Model has an empty source."),
+                    { QStringLiteral("source empty") },
+                    source);
+            sourceIssue.insert(QStringLiteral("evidenceProfile"),
+                               evidenceProfile(QStringLiteral("quick3d-model-properties"),
+                                               QStringLiteral("Model source property"),
+                                               {
+                                                   QStringLiteral("custom geometry providers may not use the source URL property"),
+                                                   QStringLiteral("does not prove final raster output when geometry is supplied another way"),
+                                               }));
+            sourceIssue.insert(QStringLiteral("repairHints"), QJsonArray{
+                repairHint(QStringLiteral("assign-model-source"), 0.80,
+                           QStringLiteral("Empty Model.source commonly leaves render bounds invalid or unavailable."),
+                           {
+                               { QStringLiteral("suggestedDirection"), QStringLiteral("set Model.source or provide valid custom geometry") },
+                           }),
+            });
+            issues->append(sourceIssue);
+        }
+
         bool readableMaterials = false;
         const int materialCount = quick3DMaterialCount(object, &readableMaterials);
         if (readableMaterials && materialCount == 0) {
@@ -1306,8 +1331,28 @@ static void appendQuick3DNodeDiagnostics(QObject *object, int nodeId,
         const QJsonObject node = QQmlAgentUiTree::nodeForObject(
                 object, 0, 0, true, true, { QStringLiteral("render3D") });
         const QJsonObject render3D = node.value(QStringLiteral("render3D")).toObject();
+        if (!render3D.value(QStringLiteral("available")).toBool(false)
+            && render3D.value(QStringLiteral("reason")).toString()
+                    == QLatin1String("model_bounds_invalid")) {
+            QJsonObject boundsIssue = issue(
+                    QStringLiteral("quick3d.model_invalid_bounds"), QStringLiteral("error"),
+                    0.90, nodeId,
+                    QStringLiteral("Quick3D Model bounds are invalid."),
+                    { QStringLiteral("render3D.reason=model_bounds_invalid") },
+                    source);
+            boundsIssue.insert(QStringLiteral("render3D"), render3D);
+            boundsIssue.insert(QStringLiteral("evidenceProfile"),
+                               evidenceProfile(QStringLiteral("quick3d-render-bounds"),
+                                               QStringLiteral("Model bounds.minimum and bounds.maximum validation"),
+                                               {
+                                                   QStringLiteral("bounds can be unavailable before mesh load; invalid ordered/non-finite bounds are reported separately from zero-size unloaded bounds"),
+                                               }));
+            issues->append(boundsIssue);
+        }
+        const QJsonObject inFrustum = render3D.value(QStringLiteral("inFrustum")).toObject();
         if (render3D.value(QStringLiteral("available")).toBool(false)
-            && !render3D.value(QStringLiteral("inFrustum")).toBool(true)) {
+            && inFrustum.contains(QStringLiteral("value"))
+            && !inFrustum.value(QStringLiteral("value")).toBool(true)) {
             QJsonObject frustumIssue = issue(
                     QStringLiteral("quick3d.model_outside_frustum"), QStringLiteral("warning"),
                     0.80, nodeId,
@@ -1699,7 +1744,8 @@ QJsonObject QQmlAgentDiagnostics::analyzeNode(const QJsonObject &params)
     }
 
     const int enabledIndex = object->metaObject()->indexOfProperty("enabled");
-    const bool runEnabledCheck = checkRequested(checks, QStringLiteral("enabled")) || clickableCheck;
+    const bool enabledExplicitlyRequested = checkExplicitlyRequested(checks, QStringLiteral("enabled"));
+    const bool runEnabledCheck = enabledExplicitlyRequested || clickableCheck;
     if (runEnabledCheck && enabledIndex >= 0 && !object->property("enabled").toBool()) {
         issues.append(issue(QStringLiteral("input.not_clickable"), QStringLiteral("error"), 1.0, nodeId,
                             QStringLiteral("Node is disabled."),

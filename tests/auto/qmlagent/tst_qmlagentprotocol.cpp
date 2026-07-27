@@ -284,8 +284,10 @@ void tst_QQmlAgentProtocol::mcpToolSchemasExposeAgentFirstContracts()
     const QJsonObject pick3DProperties = pick3D.value(QStringLiteral("inputSchema")).toObject()
             .value(QStringLiteral("properties")).toObject();
     QVERIFY(pick3DProperties.contains(QStringLiteral("selector")));
+    QVERIFY(pick3DProperties.contains(QStringLiteral("modelSelector")));
     QVERIFY(pick3DProperties.contains(QStringLiteral("x")));
     QVERIFY(pick3DProperties.contains(QStringLiteral("y")));
+    QVERIFY(pick3DProperties.contains(QStringLiteral("coordinateSpace")));
 
     const QJsonObject scrollIntoView =
             mcpToolByName(QStringLiteral("qmlagent_input_scroll_into_view"));
@@ -308,6 +310,7 @@ void tst_QQmlAgentProtocol::mcpToolSchemasExposeAgentFirstContracts()
              qPrintable(QJsonDocument(diagnosticsTree).toJson(QJsonDocument::Compact)));
     const QJsonObject diagnosticsProperties = diagnosticsTree.value(QStringLiteral("inputSchema"))
             .toObject().value(QStringLiteral("properties")).toObject();
+    QVERIFY(diagnosticsProperties.value(QStringLiteral("checks")).isObject());
     QCOMPARE(diagnosticsProperties.value(QStringLiteral("verbosity")).toObject()
                      .value(QStringLiteral("default")).toString(),
              QStringLiteral("summary"));

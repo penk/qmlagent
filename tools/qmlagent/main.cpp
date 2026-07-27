@@ -602,6 +602,9 @@ static QJsonObject sendLauncherMailboxControlRequest(const QString &mailboxDir, 
     }
     QFile::setPermissions(requestPath, privateFilePermissions());
 
+    if (method == QLatin1String("Session.stop"))
+        controlLock.unlock();
+
     return readLauncherMailboxResponse(responsePath, timeoutMs, error);
 }
 
@@ -971,7 +974,7 @@ static void printCallHelp()
            << "  qmlagentctl call Input.scrollIntoView --params '{\"selector\":\"id=\\\"saveButton\\\"\"}'\n"
            << "  qmlagentctl call UI.waitFor --params '{\"selector\":\"id=\\\"popup\\\"\",\"until\":{\"state\":\"found\"}}'\n"
            << "  qmlagentctl call Diagnostics.analyzeBinding --params '{\"selector\":\"id=\\\"panel\\\"\",\"property\":\"x\"}'\n"
-           << "  qmlagentctl call Render.pick3D --params '{\"selector\":\"id=\\\"view3d\\\"\",\"x\":160,\"y\":120}'\n"
+           << "  qmlagentctl call Render.pick3D --params '{\"selector\":\"id=\\\"view3d\\\"\",\"modelSelector\":\"id=\\\"cube\\\"\",\"x\":160,\"y\":120,\"coordinateSpace\":\"auto\"}'\n"
            << "  qmlagentctl call Render.captureScreenshot --params '{\"scale\":0.5}'\n"
            << "\nScreenshot data is omitted by default; pass includeData:true only when\n"
            << "PNG bytes are needed, and prefer scale/region to bound them.\n";
@@ -1025,7 +1028,7 @@ static int runCtlSubcommand(const QStringList &arguments)
                 << "  qmlagentctl clear-text <selector>\n"
                 << "  qmlagentctl dismiss-popup [--all]\n"
                 << "  qmlagentctl wait <selector> --state found|notFound [--timeout ms]\n"
-                << "  qmlagentctl pick3d <view3d-selector> --x px --y px\n"
+                << "  qmlagentctl pick3d <view3d-selector> --x px --y px [--model-selector selector] [--coordinate-space auto|local|window]\n"
                 << "  qmlagentctl screenshot [--window-id n] [--scale 0.5] [--region x,y,w,h] [--include-data] [--out file.png]\n"
                 << "  qmlagentctl reload-preview\n"
                 << "  qmlagentctl stop\n"
@@ -1036,7 +1039,10 @@ static int runCtlSubcommand(const QStringList &arguments)
                 << "fields=[\"render3D\"] on Model nodes for world bounds, projected screen\n"
                 << "bounds, camera distance, and approximate frustum evidence. Use\n"
                 << "qmlagentctl pick3d <view3d-selector> --x px --y px for read-only\n"
-                << "View3D hit-test evidence.\n\n"
+                << "View3D hit-test evidence. The default coordinate space is auto:\n"
+                << "View3D-local first, then window logical pixels when the point lies\n"
+                << "inside the View3D. Pass --model-selector to use the targeted\n"
+                << "View3D.pick(x,y,model) overload.\n\n"
                 << "Screenshot is fallback visual evidence. Use structural UI,\n"
                 << "diagnostics, source, log, and input/workflow evidence first;\n"
                 << "--include-data is opt-in to preserve agent context.\n"
@@ -1357,6 +1363,12 @@ static int runCtlSubcommand(const QStringList &arguments)
                 { QStringLiteral("x"), x },
                 { QStringLiteral("y"), y },
             };
+            const QString coordinateSpace = argumentValue(arguments, QStringLiteral("--coordinate-space"));
+            if (!coordinateSpace.isEmpty())
+                params.insert(QStringLiteral("coordinateSpace"), coordinateSpace);
+            const QString modelSelector = argumentValue(arguments, QStringLiteral("--model-selector"));
+            if (!modelSelector.isEmpty())
+                params.insert(QStringLiteral("modelSelector"), modelSelector);
         } else if (command == QLatin1String("wait")) {
             if (arguments.size() < 3)
                 return fail(QStringLiteral("qmlagentctl wait requires a selector."));
@@ -1977,6 +1989,8 @@ private:
                                          .toString(QStringLiteral("summary")));
             if (arguments.contains(QStringLiteral("maxIssues")))
                 targetParams->insert(QStringLiteral("maxIssues"), arguments.value(QStringLiteral("maxIssues")));
+            if (arguments.contains(QStringLiteral("checks")))
+                targetParams->insert(QStringLiteral("checks"), arguments.value(QStringLiteral("checks")));
             return true;
         }
         if (name == QLatin1String("qmlagent_diagnostics_analyze_node")) {
@@ -2244,6 +2258,12 @@ private:
             }
             targetParams->insert(QStringLiteral("x"), arguments.value(QStringLiteral("x")));
             targetParams->insert(QStringLiteral("y"), arguments.value(QStringLiteral("y")));
+            if (arguments.contains(QStringLiteral("coordinateSpace")))
+                targetParams->insert(QStringLiteral("coordinateSpace"),
+                                     arguments.value(QStringLiteral("coordinateSpace")));
+            if (arguments.contains(QStringLiteral("modelSelector")))
+                targetParams->insert(QStringLiteral("modelSelector"),
+                                     arguments.value(QStringLiteral("modelSelector")));
             return true;
         }
         if (name == QLatin1String("qmlagent_source_resolve")) {

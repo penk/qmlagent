@@ -3,6 +3,7 @@
 
 #include "qqmlagentruntime_p.h"
 
+#include "qqmlagentjsonutils_p.h"
 #include "qqmlagentsourceresolver_p.h"
 #include "qqmlagentuitree_p.h"
 
@@ -13,6 +14,7 @@
 #include <QtCore/qtimer.h>
 #include <QtCore/qvariant.h>
 #include <QtGui/qguiapplication.h>
+#include <QtGui/qvector3d.h>
 #include <QtQuick/qquickitem.h>
 #include <QtQuick/qquickwindow.h>
 
@@ -148,6 +150,62 @@ QVariant variantFromJson(const QJsonValue &value)
     return QVariant();
 }
 
+bool variantNumber(const QVariant &value, float *number)
+{
+    bool ok = false;
+    const double parsed = value.toDouble(&ok);
+    if (!ok || !qIsFinite(parsed)
+            || parsed < -std::numeric_limits<float>::max()
+            || parsed > std::numeric_limits<float>::max()) {
+        return false;
+    }
+    *number = float(parsed);
+    return true;
+}
+
+bool vector3DFromVariant(const QVariant &value, QVector3D *vector)
+{
+    if (value.metaType() == QMetaType::fromType<QVector3D>()) {
+        *vector = value.value<QVector3D>();
+        return true;
+    }
+
+    if (value.canConvert<QVariantMap>()) {
+        const QVariantMap map = value.toMap();
+        if (!map.contains(QStringLiteral("x")) || !map.contains(QStringLiteral("y"))
+                || !map.contains(QStringLiteral("z"))) {
+            return false;
+        }
+        float x = 0.0f;
+        float y = 0.0f;
+        float z = 0.0f;
+        if (!variantNumber(map.value(QStringLiteral("x")), &x)
+                || !variantNumber(map.value(QStringLiteral("y")), &y)
+                || !variantNumber(map.value(QStringLiteral("z")), &z)) {
+            return false;
+        }
+        *vector = QVector3D(x, y, z);
+        return true;
+    }
+
+    if (value.canConvert<QVariantList>()) {
+        const QVariantList list = value.toList();
+        if (list.size() != 3)
+            return false;
+        float x = 0.0f;
+        float y = 0.0f;
+        float z = 0.0f;
+        if (!variantNumber(list.at(0), &x) || !variantNumber(list.at(1), &y)
+                || !variantNumber(list.at(2), &z)) {
+            return false;
+        }
+        *vector = QVector3D(x, y, z);
+        return true;
+    }
+
+    return false;
+}
+
 bool jsonValueSupportedForRuntime(const QJsonValue &value)
 {
     if (isPrimitiveJsonValue(value))
@@ -179,6 +237,13 @@ bool convertVariant(QVariant *value, QMetaType targetType)
         return true;
     if (value->metaType() == targetType)
         return true;
+    if (targetType == QMetaType::fromType<QVector3D>()) {
+        QVector3D vector;
+        if (!vector3DFromVariant(*value, &vector))
+            return false;
+        *value = QVariant::fromValue(vector);
+        return true;
+    }
     return value->convert(targetType);
 }
 
@@ -186,7 +251,7 @@ QJsonValue jsonValueFromVariant(const QVariant &value)
 {
     if (!value.isValid())
         return QJsonValue();
-    return QJsonValue::fromVariant(value);
+    return QQmlAgentJsonUtils::valueFromVariant(value);
 }
 
 QJsonObject failedTargetResult(const QJsonObject &params, const QQmlAgentUiTree::NodeRef &ref,

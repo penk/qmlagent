@@ -47,6 +47,8 @@ private slots:
     void selectorStabilityReflectsTreeUniqueness();
     void queryManyAlignsResultsAndAppliesDefaults();
     void windowObjectIsAddressable();
+    void runtimeSetPropertyConvertsVector3D();
+    void diagnosticsDefaultScanDoesNotFlagDisabledControls();
 #ifdef QMLAGENT_HAS_QUICK3D
     void quick3DReachabilityIsAutomatic();
     void quick3DView3DIncludesSceneChildrenAutomatically();
@@ -518,6 +520,100 @@ void tst_QQmlAgentInput::windowObjectIsAddressable()
              QStringLiteral("Eval Window"));
 }
 
+void tst_QQmlAgentInput::runtimeSetPropertyConvertsVector3D()
+{
+    QQmlEngine engine;
+    QQmlComponent component(&engine);
+    component.setData(R"(
+import QtQml
+import QtQuick
+import QtQuick.Window
+
+Window {
+    width: 100
+    height: 100
+    visible: false
+
+    Item {
+        objectName: "runtime.vector.probe"
+        property vector3d offset: Qt.vector3d(1, 2, 3)
+    }
+}
+)",
+                      QUrl(QStringLiteral("file:///tmp/RuntimeVector.qml")));
+    QScopedPointer<QObject> root(component.create());
+    QVERIFY2(root, qPrintable(component.errorString()));
+
+    const QJsonObject result = QQmlAgentRuntime::setProperty({
+        { QStringLiteral("selector"), QStringLiteral("objectName=\"runtime.vector.probe\"") },
+        { QStringLiteral("property"), QStringLiteral("offset") },
+        { QStringLiteral("value"), QJsonObject{
+            { QStringLiteral("x"), 4 },
+            { QStringLiteral("y"), 5 },
+            { QStringLiteral("z"), 6 },
+        } },
+        { QStringLiteral("settle"), QJsonObject{ { QStringLiteral("timeoutMs"), 0 } } },
+    });
+    QVERIFY2(result.value(QStringLiteral("ok")).toBool(),
+             qPrintable(QJsonDocument(result).toJson(QJsonDocument::Compact)));
+    QCOMPARE(result.value(QStringLiteral("after")).toObject()
+                     .value(QStringLiteral("x")).toDouble(),
+             4.0);
+    QCOMPARE(result.value(QStringLiteral("after")).toObject()
+                     .value(QStringLiteral("y")).toDouble(),
+             5.0);
+    QCOMPARE(result.value(QStringLiteral("after")).toObject()
+                     .value(QStringLiteral("z")).toDouble(),
+             6.0);
+}
+
+static bool issueIdsContain(const QJsonArray &issues, const QString &id)
+{
+    for (const QJsonValue &issueValue : issues) {
+        if (issueValue.toObject().value(QStringLiteral("id")).toString() == id)
+            return true;
+    }
+    return false;
+}
+
+void tst_QQmlAgentInput::diagnosticsDefaultScanDoesNotFlagDisabledControls()
+{
+    QQmlEngine engine;
+    QQmlComponent component(&engine);
+    component.setData(R"(
+import QtQuick
+import QtQuick.Controls
+
+ApplicationWindow {
+    width: 240
+    height: 120
+    visible: false
+
+    Button {
+        objectName: "diagnostics.disabled.intentional"
+        text: "Unavailable"
+        enabled: false
+    }
+}
+)",
+                      QUrl(QStringLiteral("file:///tmp/IntentionalDisabled.qml")));
+    QScopedPointer<QObject> root(component.create());
+    QVERIFY2(root, qPrintable(component.errorString()));
+
+    const QJsonArray defaultIssues = QQmlAgentDiagnostics::analyzeTree({
+        { QStringLiteral("includeInvisible"), true },
+    }).value(QStringLiteral("issues")).toArray();
+    QVERIFY2(!issueIdsContain(defaultIssues, QStringLiteral("input.not_clickable")),
+             qPrintable(QJsonDocument(defaultIssues).toJson(QJsonDocument::Compact)));
+
+    const QJsonArray explicitIssues = QQmlAgentDiagnostics::analyzeNode({
+        { QStringLiteral("selector"), QStringLiteral("objectName=\"diagnostics.disabled.intentional\"") },
+        { QStringLiteral("checks"), QJsonArray{ QStringLiteral("enabled") } },
+    }).value(QStringLiteral("issues")).toArray();
+    QVERIFY2(issueIdsContain(explicitIssues, QStringLiteral("input.not_clickable")),
+             qPrintable(QJsonDocument(explicitIssues).toJson(QJsonDocument::Compact)));
+}
+
 #ifdef QMLAGENT_HAS_QUICK3D
 static bool jsonArrayContainsString(const QJsonArray &array, const QString &needle)
 {
@@ -550,13 +646,15 @@ static QString selectorValueForKind(const QJsonArray &selectors, const QString &
     return {};
 }
 
-static bool issueIdsContain(const QJsonArray &issues, const QString &id)
+static bool allIssueIdsStartWith(const QJsonArray &issues, const QString &prefix)
 {
+    if (issues.isEmpty())
+        return false;
     for (const QJsonValue &issueValue : issues) {
-        if (issueValue.toObject().value(QStringLiteral("id")).toString() == id)
-            return true;
+        if (!issueValue.toObject().value(QStringLiteral("id")).toString().startsWith(prefix))
+            return false;
     }
-    return false;
+    return true;
 }
 
 void tst_QQmlAgentInput::quick3DReachabilityIsAutomatic()
@@ -718,6 +816,22 @@ Window {
     QCOMPARE(pick.value(QStringLiteral("point")).toObject()
                      .value(QStringLiteral("x")).toInt(),
              10);
+    const QJsonObject targetedPick = QQmlAgentRender::pick3D({
+        { QStringLiteral("selector"), QStringLiteral("objectName=\"quick3d.probe.view\"") },
+        { QStringLiteral("modelSelector"), QStringLiteral("objectName=\"quick3d.probe.cube\"") },
+        { QStringLiteral("x"), 10 },
+        { QStringLiteral("y"), 10 },
+    });
+    QVERIFY2(targetedPick.value(QStringLiteral("ok")).toBool(),
+             qPrintable(QJsonDocument(targetedPick).toJson(QJsonDocument::Compact)));
+    QVERIFY2(targetedPick.value(QStringLiteral("targetedModel")).toBool(),
+             qPrintable(QJsonDocument(targetedPick).toJson(QJsonDocument::Compact)));
+    QCOMPARE(targetedPick.value(QStringLiteral("method")).toString(),
+             QStringLiteral("pick(float,float,QQuick3DModel*)"));
+    QCOMPARE(targetedPick.value(QStringLiteral("modelTarget")).toObject()
+                     .value(QStringLiteral("node")).toObject()
+                     .value(QStringLiteral("objectName")).toString(),
+             QStringLiteral("quick3d.probe.cube"));
     QCOMPARE(model.value(QStringLiteral("properties")).toObject()
                      .value(QStringLiteral("source")).toString(),
              QStringLiteral("#Cube"));
@@ -989,6 +1103,11 @@ Window {
     height: 240
     visible: false
 
+    Item {
+        objectName: "quick3d.diag.disabledNon3D"
+        enabled: false
+    }
+
     View3D {
         id: badView
         objectName: "quick3d.diag.view"
@@ -1012,6 +1131,13 @@ Window {
                     objectName: "quick3d.diag.missingTexture"
                 }
             }
+        }
+
+        Model {
+            id: invalidSourceModel
+            objectName: "quick3d.diag.invalidSource"
+            source: ""
+            materials: PrincipledMaterial { baseColor: "#ef4444" }
         }
     }
 
@@ -1070,6 +1196,28 @@ Window {
     QVERIFY2(issueIdsContain(flatCubeIssues, QStringLiteral("quick3d.model_degenerate_scale")),
              qPrintable(QJsonDocument(flatCubeIssues).toJson(QJsonDocument::Compact)));
 
+    const QJsonObject invalidSourceQuery = QQmlAgentUiTree::query({
+        { QStringLiteral("selector"), QStringLiteral("objectName=\"quick3d.diag.invalidSource\"") },
+        { QStringLiteral("includeInvisible"), true },
+        { QStringLiteral("fields"), QJsonArray{ QStringLiteral("render3D") } },
+    });
+    const QJsonObject invalidRender = invalidSourceQuery.value(QStringLiteral("matches")).toArray()
+            .at(0).toObject().value(QStringLiteral("render3D")).toObject();
+    QVERIFY2(!invalidRender.value(QStringLiteral("available")).toBool(),
+             qPrintable(QJsonDocument(invalidRender).toJson(QJsonDocument::Compact)));
+    QVERIFY2(invalidRender.value(QStringLiteral("reason")).toString()
+                    == QLatin1String("model_bounds_invalid")
+                    || invalidRender.value(QStringLiteral("reason")).toString()
+                    == QLatin1String("model_bounds_unavailable"),
+             qPrintable(QJsonDocument(invalidRender).toJson(QJsonDocument::Compact)));
+
+    const QJsonArray invalidSourceIssues = QQmlAgentDiagnostics::analyzeNode({
+        { QStringLiteral("selector"), QStringLiteral("objectName=\"quick3d.diag.invalidSource\"") },
+        { QStringLiteral("checks"), quick3DChecks },
+    }).value(QStringLiteral("issues")).toArray();
+    QVERIFY2(issueIdsContain(invalidSourceIssues, QStringLiteral("quick3d.model_missing_source")),
+             qPrintable(QJsonDocument(invalidSourceIssues).toJson(QJsonDocument::Compact)));
+
     const QJsonArray textureIssues = QQmlAgentDiagnostics::analyzeNode({
         { QStringLiteral("selector"), QStringLiteral("objectName=\"quick3d.diag.missingTexture\"") },
         { QStringLiteral("checks"), quick3DChecks },
@@ -1085,6 +1233,15 @@ Window {
     const QJsonArray ran = summary.value(QStringLiteral("ran")).toArray();
     QVERIFY2(jsonArrayContainsString(ran, QStringLiteral("quick3D")),
              qPrintable(QJsonDocument(summary).toJson(QJsonDocument::Compact)));
+
+    const QJsonArray focusedIssues = QQmlAgentDiagnostics::analyzeTree({
+        { QStringLiteral("checks"), quick3DChecks },
+        { QStringLiteral("includeInvisible"), true },
+    }).value(QStringLiteral("issues")).toArray();
+    QVERIFY2(allIssueIdsStartWith(focusedIssues, QStringLiteral("quick3d.")),
+             qPrintable(QJsonDocument(focusedIssues).toJson(QJsonDocument::Compact)));
+    QVERIFY2(!issueIdsContain(focusedIssues, QStringLiteral("input.not_clickable")),
+             qPrintable(QJsonDocument(focusedIssues).toJson(QJsonDocument::Compact)));
 }
 #endif
 
