@@ -5,6 +5,7 @@
 
 #include "qqmlagentactionability_p.h"
 #include "qqmlagentdiagnostics_p.h"
+#include "qqmlagentjsonutils_p.h"
 #include "qqmlagentsourceresolver_p.h"
 
 #include <QtCore/qjsonarray.h>
@@ -15,14 +16,10 @@
 #include <QtCore/qproperty.h>
 #include <QtCore/qregularexpression.h>
 #include <QtCore/qset.h>
-#include <QtCore/qurl.h>
 #include <QtCore/qtimer.h>
 #include <QtCore/qvariant.h>
 #include <QtCore/qvector.h>
-#include <QtGui/qcolor.h>
 #include <QtGui/qguiapplication.h>
-#include <QtGui/qquaternion.h>
-#include <QtGui/qvector3d.h>
 #include <QtGui/qwindow.h>
 #include <QtQml/qqmlcontext.h>
 #include <QtQml/qqmlproperty.h>
@@ -181,74 +178,6 @@ static QString sourceLocationSelectorValue(const QJsonObject &location)
     if (column <= 0)
         return QStringLiteral("%1:%2").arg(file).arg(line);
     return QStringLiteral("%1:%2:%3").arg(file).arg(line).arg(column);
-}
-
-static QJsonValue jsonValueFromVariant(const QVariant &value)
-{
-    switch (value.metaType().id()) {
-    case QMetaType::Bool:
-        return value.toBool();
-    case QMetaType::Int:
-    case QMetaType::UInt:
-    case QMetaType::LongLong:
-    case QMetaType::ULongLong:
-        return value.toLongLong();
-    case QMetaType::Float:
-    case QMetaType::Double:
-        return value.toDouble();
-    case QMetaType::QString:
-        return value.toString();
-    case QMetaType::QUrl:
-        return value.toUrl().toString();
-    case QMetaType::QColor: {
-        const QColor color = qvariant_cast<QColor>(value);
-        if (!color.isValid())
-            return QJsonValue();
-        if (color.alpha() == 255)
-            return color.name(QColor::HexRgb);
-        return color.name(QColor::HexArgb);
-    }
-    case QMetaType::QPoint:
-    case QMetaType::QPointF: {
-        const QPointF point = value.toPointF();
-        return QJsonObject{
-            { QStringLiteral("x"), point.x() },
-            { QStringLiteral("y"), point.y() },
-        };
-    }
-    case QMetaType::QVector3D: {
-        const QVector3D vector = value.value<QVector3D>();
-        return QJsonObject{
-            { QStringLiteral("x"), vector.x() },
-            { QStringLiteral("y"), vector.y() },
-            { QStringLiteral("z"), vector.z() },
-        };
-    }
-    case QMetaType::QQuaternion: {
-        const QQuaternion quaternion = value.value<QQuaternion>();
-        return QJsonObject{
-            { QStringLiteral("scalar"), quaternion.scalar() },
-            { QStringLiteral("x"), quaternion.x() },
-            { QStringLiteral("y"), quaternion.y() },
-            { QStringLiteral("z"), quaternion.z() },
-        };
-    }
-    case QMetaType::QSize:
-    case QMetaType::QSizeF: {
-        const QSizeF size = value.toSizeF();
-        return QJsonObject{
-            { QStringLiteral("width"), size.width() },
-            { QStringLiteral("height"), size.height() },
-        };
-    }
-    case QMetaType::QRect:
-    case QMetaType::QRectF: {
-        const QRectF rect = value.toRectF();
-        return rectArray(rect);
-    }
-    default:
-        return QJsonValue::fromVariant(value);
-    }
 }
 
 struct SelectorUniquenessIndex
@@ -1253,14 +1182,14 @@ static QJsonObject nodeForObjectInternal(QObject *object, int windowId, int dept
             if (property.contains(QLatin1Char('.'))) {
                 // Dotted paths reach grouped and sub-object state such as
                 // RangeSlider first.value or font.pixelSize (F-006).
-                const QQmlProperty qmlProperty(object, property);
-                if (qmlProperty.isValid())
-                    propertyObject.insert(property, jsonValueFromVariant(qmlProperty.read()));
+                const QJsonValue value = QQmlAgentJsonUtils::propertyValue(object, property);
+                if (!value.isUndefined())
+                    propertyObject.insert(property, value);
                 continue;
             }
             const int index = object->metaObject()->indexOfProperty(property.toUtf8().constData());
             if (index >= 0)
-                propertyObject.insert(property, jsonValueFromVariant(object->property(property.toUtf8())));
+                propertyObject.insert(property, QQmlAgentJsonUtils::propertyValue(object, property));
         }
         if (!propertyObject.isEmpty())
             insertField(&node, options, QStringLiteral("properties"), propertyObject);

@@ -545,6 +545,7 @@ void tst_QQmlAgentInput::quick3DReachabilityIsAutomatic()
     component.setData(R"(
 import QtQuick
 import QtQuick.Window
+import QtQml.Models
 import QtQuick3D
 
 Window {
@@ -552,9 +553,27 @@ Window {
     height: 240
     visible: false
 
+    QtObject {
+        id: transformSeed
+        property vector3d cubeScale: Qt.vector3d(1.8, 1.8, 1.8)
+    }
+
+    ListModel {
+        id: frameModel
+        ListElement { xOffset: 0 }
+        ListElement { xOffset: 50 }
+    }
+
     View3D {
         id: view
+        objectName: "quick3d.probe.view"
         anchors.fill: parent
+        camera: camera
+        environment: SceneEnvironment {
+            id: sceneEnvironment
+            backgroundMode: SceneEnvironment.Color
+            clearColor: "#101010"
+        }
 
         PerspectiveCamera {
             id: camera
@@ -570,10 +589,29 @@ Window {
             id: cube
             objectName: "quick3d.probe.cube"
             source: "#Cube"
-            scale: Qt.vector3d(1.8, 1.8, 1.8)
+            scale: transformSeed.cubeScale
             materials: PrincipledMaterial {
                 id: cubeMaterial
                 baseColor: "#41cd52"
+                baseColorMap: Texture {
+                    id: cubeTexture
+                    sourceItem: Rectangle {
+                        id: textureSource
+                        width: 8
+                        height: 8
+                        color: "#41cd52"
+                    }
+                }
+            }
+        }
+
+        Repeater3D {
+            id: frameRepeater
+            objectName: "quick3d.probe.repeater"
+            model: frameModel
+            delegate: Model {
+                source: "#Cube"
+                x: xOffset
             }
         }
     }
@@ -604,6 +642,8 @@ Window {
         { QStringLiteral("properties"), QJsonArray{
             QStringLiteral("source"),
             QStringLiteral("scale"),
+            QStringLiteral("sceneTransform"),
+            QStringLiteral("materials"),
         } },
     });
     const QJsonArray matches = queried.value(QStringLiteral("matches")).toArray();
@@ -623,6 +663,22 @@ Window {
     QCOMPARE(model.value(QStringLiteral("properties")).toObject()
                      .value(QStringLiteral("source")).toString(),
              QStringLiteral("#Cube"));
+    const QJsonObject modelProperties = model.value(QStringLiteral("properties")).toObject();
+    const QJsonObject scale = modelProperties.value(QStringLiteral("scale")).toObject();
+    QVERIFY(qAbs(scale.value(QStringLiteral("x")).toDouble() - 1.8) < 0.001);
+    QVERIFY(qAbs(scale.value(QStringLiteral("y")).toDouble() - 1.8) < 0.001);
+    QVERIFY(qAbs(scale.value(QStringLiteral("z")).toDouble() - 1.8) < 0.001);
+    const QJsonArray sceneTransform = modelProperties.value(QStringLiteral("sceneTransform")).toArray();
+    QCOMPARE(sceneTransform.size(), 4);
+    QCOMPARE(sceneTransform.at(0).toArray().size(), 4);
+    const QJsonObject materials = modelProperties.value(QStringLiteral("materials")).toObject();
+    QCOMPARE(materials.value(QStringLiteral("kind")).toString(), QStringLiteral("QObjectListRef"));
+    QCOMPARE(materials.value(QStringLiteral("count")).toInt(), 1);
+    const QJsonObject materialRef = materials.value(QStringLiteral("items")).toArray().at(0).toObject();
+    QCOMPARE(materialRef.value(QStringLiteral("qmlId")).toString(), QStringLiteral("cubeMaterial"));
+    QVERIFY2(materialRef.value(QStringLiteral("selector")).toString()
+                    .contains(QStringLiteral("cubeMaterial")),
+             qPrintable(QJsonDocument(materialRef).toJson(QJsonDocument::Compact)));
 
     const QJsonObject sourceLocation = model.value(QStringLiteral("sourceLocation")).toObject();
     QCOMPARE(sourceLocation.value(QStringLiteral("method")).toString(),
@@ -630,6 +686,74 @@ Window {
     QVERIFY(sourceLocation.value(QStringLiteral("file")).toString()
                     .endsWith(QStringLiteral("Quick3DReachability.qml")));
     QVERIFY(sourceLocation.value(QStringLiteral("line")).toInt() > 0);
+
+    const QJsonObject viewQuery = QQmlAgentUiTree::query({
+        { QStringLiteral("selector"), QStringLiteral("objectName=\"quick3d.probe.view\"") },
+        { QStringLiteral("includeInvisible"), true },
+        { QStringLiteral("fields"), QJsonArray{
+            QStringLiteral("type"),
+            QStringLiteral("properties"),
+        } },
+        { QStringLiteral("properties"), QJsonArray{
+            QStringLiteral("camera"),
+            QStringLiteral("environment"),
+        } },
+    });
+    const QJsonObject viewProperties = viewQuery.value(QStringLiteral("matches")).toArray()
+            .at(0).toObject().value(QStringLiteral("properties")).toObject();
+    QCOMPARE(viewProperties.value(QStringLiteral("camera")).toObject()
+                     .value(QStringLiteral("qmlId")).toString(),
+             QStringLiteral("camera"));
+    QCOMPARE(viewProperties.value(QStringLiteral("environment")).toObject()
+                     .value(QStringLiteral("qmlId")).toString(),
+             QStringLiteral("sceneEnvironment"));
+
+    const QJsonObject materialQuery = QQmlAgentUiTree::query({
+        { QStringLiteral("selector"), QStringLiteral("id=\"cubeMaterial\"") },
+        { QStringLiteral("includeInvisible"), true },
+        { QStringLiteral("fields"), QJsonArray{ QStringLiteral("properties") } },
+        { QStringLiteral("properties"), QJsonArray{ QStringLiteral("baseColorMap") } },
+    });
+    const QJsonObject textureRef = materialQuery.value(QStringLiteral("matches")).toArray()
+            .at(0).toObject().value(QStringLiteral("properties")).toObject()
+            .value(QStringLiteral("baseColorMap")).toObject();
+    QCOMPARE(textureRef.value(QStringLiteral("qmlId")).toString(), QStringLiteral("cubeTexture"));
+
+    const QJsonObject textureQuery = QQmlAgentUiTree::query({
+        { QStringLiteral("selector"), QStringLiteral("id=\"cubeTexture\"") },
+        { QStringLiteral("includeInvisible"), true },
+        { QStringLiteral("fields"), QJsonArray{ QStringLiteral("properties") } },
+        { QStringLiteral("properties"), QJsonArray{ QStringLiteral("sourceItem") } },
+    });
+    const QJsonObject sourceItemRef = textureQuery.value(QStringLiteral("matches")).toArray()
+            .at(0).toObject().value(QStringLiteral("properties")).toObject()
+            .value(QStringLiteral("sourceItem")).toObject();
+    QCOMPARE(sourceItemRef.value(QStringLiteral("qmlId")).toString(), QStringLiteral("textureSource"));
+
+    const QJsonObject repeaterQuery = QQmlAgentUiTree::query({
+        { QStringLiteral("selector"), QStringLiteral("objectName=\"quick3d.probe.repeater\"") },
+        { QStringLiteral("includeInvisible"), true },
+        { QStringLiteral("fields"), QJsonArray{ QStringLiteral("properties") } },
+        { QStringLiteral("properties"), QJsonArray{ QStringLiteral("model") } },
+    });
+    const QJsonObject repeaterModelRef = repeaterQuery.value(QStringLiteral("matches")).toArray()
+            .at(0).toObject().value(QStringLiteral("properties")).toObject()
+            .value(QStringLiteral("model")).toObject();
+    QCOMPARE(repeaterModelRef.value(QStringLiteral("qmlId")).toString(), QStringLiteral("frameModel"));
+
+    const QJsonObject binding = QQmlAgentDiagnostics::analyzeBinding({
+        { QStringLiteral("selector"), QStringLiteral("id=\"cube\"") },
+        { QStringLiteral("property"), QStringLiteral("scale") },
+    });
+    QVERIFY2(binding.value(QStringLiteral("ok")).toBool(),
+             qPrintable(QJsonDocument(binding).toJson(QJsonDocument::Compact)));
+    QVERIFY(qAbs(binding.value(QStringLiteral("value")).toObject()
+                         .value(QStringLiteral("x")).toDouble() - 1.8) < 0.001);
+    const QJsonArray dependencies = binding.value(QStringLiteral("provenance")).toObject()
+            .value(QStringLiteral("dependencies")).toArray();
+    QVERIFY2(!dependencies.isEmpty(), qPrintable(QJsonDocument(binding).toJson(QJsonDocument::Compact)));
+    QVERIFY(qAbs(dependencies.at(0).toObject().value(QStringLiteral("value")).toObject()
+                         .value(QStringLiteral("x")).toDouble() - 1.8) < 0.001);
 
     const QJsonObject camera = QQmlAgentUiTree::query({
         { QStringLiteral("selector"), QStringLiteral("id=\"camera\"") },

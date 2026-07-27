@@ -3,6 +3,8 @@
 
 #include "qqmlagentsourceresolver_p.h"
 
+#include "qqmlagentjsonutils_p.h"
+
 #include <QtCore/qfile.h>
 #include <QtCore/qjsonarray.h>
 #include <QtCore/qlogging.h>
@@ -41,13 +43,6 @@ static QJsonObject makeLocation(const QString &file, int line, int column, const
     if (column > 0)
         location.insert(QStringLiteral("column"), column);
     return location;
-}
-
-static QJsonValue jsonValueFromVariant(const QVariant &value)
-{
-    if (!value.isValid())
-        return QJsonValue();
-    return QJsonValue::fromVariant(value);
 }
 
 static QString fileFromData(const QQmlData *data)
@@ -522,7 +517,7 @@ static QJsonArray dependencyEvidence(const QQmlBinding *binding)
         QObject *object = dependency.object();
         QJsonObject entry{
             { QStringLiteral("property"), dependency.name() },
-            { QStringLiteral("value"), jsonValueFromVariant(dependency.read()) },
+            { QStringLiteral("value"), QQmlAgentJsonUtils::valueFromVariant(dependency.read()) },
         };
         if (object) {
             const QQmlData *data = QQmlData::get(object);
@@ -797,7 +792,7 @@ QJsonObject QQmlAgentSourceResolver::bindingProvenanceForProperty(QObject *objec
     }
 
     result.insert(QStringLiteral("ok"), true);
-    result.insert(QStringLiteral("value"), jsonValueFromVariant(property.read()));
+    result.insert(QStringLiteral("value"), QQmlAgentJsonUtils::propertyValue(object, propertyName));
 
     QQmlAbstractBinding *binding = QQmlPropertyPrivate::binding(property);
     QPropertyBindingPrivate *qpropertyBinding = binding ? nullptr

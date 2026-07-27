@@ -16,6 +16,7 @@
 #include <QtCore/qdatetime.h>
 #include <QtCore/qdeadlinetimer.h>
 #include <QtCore/qdir.h>
+#include <QtCore/qeventloop.h>
 #include <QtCore/qfile.h>
 #include <QtCore/qfileinfo.h>
 #include <QtCore/qjsonarray.h>
@@ -1401,6 +1402,36 @@ static int runCtlSubcommand(const QStringList &arguments)
         return fail(controlError);
 
     QJsonObject result = response.value(QStringLiteral("result")).toObject();
+    if (command == QLatin1String("status")) {
+        const QJsonObject infoParams{
+            { QStringLiteral("method"), QStringLiteral("Session.getInfo") },
+            { QStringLiteral("params"), QJsonObject{} },
+        };
+        QString infoError;
+        const QJsonObject infoResponse = sendLauncherControlRequest(
+                launcher.metadata,
+                launcherControlTimeoutMs(QStringLiteral("QmlAgent.request"), infoParams, timeoutMs),
+                QStringLiteral("QmlAgent.request"),
+                infoParams,
+                &infoError);
+        const QJsonObject targetResponse = infoResponse.value(QStringLiteral("result")).toObject();
+        const QJsonObject sessionInfo = targetResponse.value(QStringLiteral("result")).toObject();
+        if (!sessionInfo.isEmpty()) {
+            result.insert(QStringLiteral("targetSessionInfo"), sessionInfo);
+            const QJsonObject capabilities = sessionInfo.value(QStringLiteral("capabilities")).toObject();
+            if (!capabilities.isEmpty())
+                result.insert(QStringLiteral("capabilities"), capabilities);
+            const QJsonArray features = sessionInfo.value(QStringLiteral("features")).toArray();
+            if (!features.isEmpty())
+                result.insert(QStringLiteral("features"), features);
+        } else if (!infoError.isEmpty()) {
+            result.insert(QStringLiteral("targetSessionInfoAvailable"), false);
+            result.insert(QStringLiteral("targetSessionInfoError"), infoError);
+        } else if (targetResponse.contains(QStringLiteral("error"))) {
+            result.insert(QStringLiteral("targetSessionInfoAvailable"), false);
+            result.insert(QStringLiteral("targetSessionInfoError"), targetResponse.value(QStringLiteral("error")));
+        }
+    }
     if (command == QLatin1String("screenshot") && !screenshotOutputPath.isEmpty()) {
         QJsonObject screenshot = result.value(QStringLiteral("result")).toObject();
         if (!screenshot.value(QStringLiteral("captured")).toBool(false))
@@ -2570,9 +2601,11 @@ private:
         const QJsonArray recentLauncherExits = recentLauncherExitReports();
         int reachableLauncherCount = 0;
         QJsonObject singleLauncher;
+        LauncherSession singleReachableLauncher;
         for (const LauncherSession &session : launcherSessions) {
             if (session.status.value(QStringLiteral("controlReachable")).toBool(true)) {
                 ++reachableLauncherCount;
+                singleReachableLauncher = session;
                 singleLauncher = launcherSessionSummaries({ session }).first().toObject();
             }
         }
@@ -2585,11 +2618,27 @@ private:
                       : QStringLiteral("Start exactly one qmlagent-launcher session for automatic gateway routing.") },
             { QStringLiteral("session"), reachableLauncherCount == 1 ? QJsonValue(singleLauncher) : QJsonValue() },
         };
+        QJsonObject launcherSessionInfo;
         // With several live sessions, list them all so an agent can pin one
         // (qmlagentctl --session <id>) without a separate discovery tool.
         if (reachableLauncherCount > 1) {
             launcherGateway.insert(QStringLiteral("sessions"),
                                    launcherSessionSummaries(launcherSessions));
+        } else if (reachableLauncherCount == 1 && !isTargetConnected()) {
+            QString requestError;
+            const QJsonObject response = sendLauncherAgentRequest(
+                    singleReachableLauncher,
+                    QStringLiteral("Session.getInfo"),
+                    {},
+                    qMin(m_timeoutMs, 1000),
+                    &requestError);
+            launcherSessionInfo = response.value(QStringLiteral("result")).toObject();
+            if (!launcherSessionInfo.isEmpty()) {
+                launcherGateway.insert(QStringLiteral("targetSessionInfoAvailable"), true);
+            } else if (!requestError.isEmpty()) {
+                launcherGateway.insert(QStringLiteral("targetSessionInfoAvailable"), false);
+                launcherGateway.insert(QStringLiteral("targetSessionInfoError"), requestError);
+            }
         }
         status.insert(QStringLiteral("launcherGateway"), launcherGateway);
         if (!recentLauncherExits.isEmpty()) {
@@ -2628,6 +2677,18 @@ private:
             status.insert(QStringLiteral("serviceEnabled"),
                           m_client->state() == QQmlDebugClient::Enabled);
             status.insert(QStringLiteral("serviceState"), int(m_client->state()));
+        }
+        const QJsonObject sessionInfo = !m_lastSessionInfo.isEmpty()
+                ? m_lastSessionInfo
+                : launcherSessionInfo;
+        if (!sessionInfo.isEmpty()) {
+            status.insert(QStringLiteral("targetSessionInfo"), sessionInfo);
+            const QJsonObject capabilities = sessionInfo.value(QStringLiteral("capabilities")).toObject();
+            if (!capabilities.isEmpty())
+                status.insert(QStringLiteral("capabilities"), capabilities);
+            const QJsonArray features = sessionInfo.value(QStringLiteral("features")).toArray();
+            if (!features.isEmpty())
+                status.insert(QStringLiteral("features"), features);
         }
         return status;
     }
@@ -2959,6 +3020,7 @@ private:
         disconnectTarget(QStringLiteral("reconnect"));
         m_recentEvents = {};
         m_recentLogEntries = {};
+        m_lastSessionInfo = {};
         m_host = host;
         m_port = port;
         m_socketPath.clear();
@@ -2991,6 +3053,7 @@ private:
             return targetStatus();
         }
 
+        refreshTargetSessionInfo(qMin(timeoutMs, 1000));
         enableStartupLogReplay();
         return targetStatus();
     }
@@ -3022,6 +3085,7 @@ private:
         disconnectTarget(QStringLiteral("reconnect"));
         m_recentEvents = {};
         m_recentLogEntries = {};
+        m_lastSessionInfo = {};
         m_host.clear();
         m_port = 0;
         m_socketPath = path;
@@ -3049,8 +3113,40 @@ private:
             return targetStatus();
         }
 
+        refreshTargetSessionInfo(qMin(timeoutMs, 1000));
         enableStartupLogReplay();
         return targetStatus();
+    }
+
+    void refreshTargetSessionInfo(int timeoutMs)
+    {
+        if (!m_client || m_currentCall.has_value() || m_workflow.has_value())
+            return;
+
+        const int targetId = ++m_nextTargetId;
+        QEventLoop loop;
+        QTimer timer;
+        timer.setSingleShot(true);
+        QMetaObject::Connection responseConnection;
+        responseConnection = connect(m_client.get(), &QmlAgentClient::received, this,
+                                     [this, targetId, &loop](const QByteArray &message) {
+            QJsonParseError parseError;
+            const QJsonDocument document = QJsonDocument::fromJson(message, &parseError);
+            if (parseError.error != QJsonParseError::NoError || !document.isObject())
+                return;
+            const QJsonObject response = document.object();
+            if (response.value(QStringLiteral("id")).toInt(-1) != targetId)
+                return;
+            const QJsonObject result = response.value(QStringLiteral("result")).toObject();
+            if (!result.isEmpty())
+                m_lastSessionInfo = result;
+            loop.quit();
+        });
+        connect(&timer, &QTimer::timeout, &loop, &QEventLoop::quit);
+        timer.start(qMax(1, timeoutMs));
+        m_client->sendMessage(compactJson(makeRequest(targetId, QStringLiteral("Session.getInfo"), {})));
+        loop.exec();
+        disconnect(responseConnection);
     }
 
     void enableStartupLogReplay()
@@ -3099,6 +3195,7 @@ private:
         m_workflow.reset();
         m_queue.clear();
         m_uiSubscribed = false;
+        m_lastSessionInfo = {};
         if (m_connection)
             m_connection->close();
         m_client.reset();
@@ -3549,6 +3646,7 @@ private:
     std::optional<WorkflowState> m_workflow;
     QJsonArray m_recentEvents;
     QJsonArray m_recentLogEntries;
+    QJsonObject m_lastSessionInfo;
     QTimer m_commandTimeout;
     int m_nextTargetId = 0;
     bool m_uiSubscribed = false;

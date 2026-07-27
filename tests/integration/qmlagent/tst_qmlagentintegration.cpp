@@ -3928,6 +3928,9 @@ void QmlAgentIntegrationTest::referenceClientConvenienceCommands()
     });
     QVERIFY2(statusOutput.contains("\"sessionType\":\"application\""), statusOutput.constData());
     QVERIFY2(statusOutput.contains("\"reloadPreviewSupported\":false"), statusOutput.constData());
+    QVERIFY2(statusOutput.contains("\"capabilities\":{"), statusOutput.constData());
+    QVERIFY2(statusOutput.contains("\"qtQuick3D\":{"), statusOutput.constData());
+    QVERIFY2(statusOutput.contains("\"targetSessionInfo\":{"), statusOutput.constData());
 
     const QByteArray inspectOutput = runClient({
         QStringLiteral("inspect"),
@@ -4208,6 +4211,13 @@ Window {
     QCOMPARE(status.value(QStringLiteral("connected")).toBool(), false);
     const QJsonObject gateway = status.value(QStringLiteral("launcherGateway")).toObject();
     QCOMPARE(gateway.value(QStringLiteral("available")).toBool(), true);
+    QVERIFY2(status.value(QStringLiteral("capabilities")).toObject()
+                    .contains(QStringLiteral("qtQuick3D")),
+             output.constData());
+    QVERIFY2(status.value(QStringLiteral("targetSessionInfo")).toObject()
+                    .value(QStringLiteral("capabilities")).toObject()
+                    .contains(QStringLiteral("qtQuick3D")),
+             output.constData());
     QVERIFY2(status.value(QStringLiteral("nextStep")).toString()
                      .contains(QStringLiteral("Call target-backed request/response tools")),
              output.constData());
@@ -4823,6 +4833,13 @@ void QmlAgentIntegrationTest::referenceClientMcpPersistentMode()
     QCOMPARE(connectedStatus.value(QStringLiteral("debugConnectionPolicy")).toObject()
                      .value(QStringLiteral("singleClientPerTarget")).toBool(),
              true);
+    QVERIFY2(connectedStatus.value(QStringLiteral("capabilities")).toObject()
+                    .contains(QStringLiteral("qtQuick3D")),
+             output.constData());
+    QVERIFY2(connectedStatus.value(QStringLiteral("targetSessionInfo")).toObject()
+                    .value(QStringLiteral("capabilities")).toObject()
+                    .contains(QStringLiteral("qtQuick3D")),
+             output.constData());
 
     const QJsonObject queryContent = responses.value(6).value(QStringLiteral("result")).toObject()
             .value(QStringLiteral("structuredContent")).toObject();

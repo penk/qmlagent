@@ -11,6 +11,7 @@ target_sources(QQmlAgentServiceFactoryPlugin PRIVATE
     qqmlagentdiagnostics.cpp qqmlagentdiagnostics_p.h
     qqmlagentinput.cpp qqmlagentinput_p.h
     qqmlagentinputdriver.cpp qqmlagentinputdriver_p.h
+    qqmlagentjsonutils.cpp qqmlagentjsonutils_p.h
     qqmlagentlogbuffer.cpp qqmlagentlogbuffer_p.h
     qqmlagentlogcollector.cpp qqmlagentlogcollector_p.h
     qqmlagentprotocol.cpp qqmlagentprotocol_p.h
