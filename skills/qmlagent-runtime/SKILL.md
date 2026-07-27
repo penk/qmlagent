@@ -132,6 +132,9 @@ for `Model`, camera, light, material, texture, and related nodes. These nodes
 are structural/source evidence, not `QQuickItem` click targets. For `Model`
 visibility/debugging, request `fields:["render3D"]` to get world bounds,
 projected screen bounds, camera distance, and approximate frustum evidence.
+Use `qmlagent_diagnostics_analyze_tree` or `qmlagent_diagnostics_analyze_node`
+with `checks:["quick3D"]` to focus on View3D camera/light setup, Model
+material/scale, texture source, and render3D-backed frustum evidence.
 Use `qmlagent_render_pick3d` or `Render.pick3D` on a `View3D` selector for
 read-only hit-test evidence at a View3D-local coordinate; it does not deliver
 input events.

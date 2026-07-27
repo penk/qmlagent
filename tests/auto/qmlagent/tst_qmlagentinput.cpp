@@ -50,6 +50,7 @@ private slots:
 #ifdef QMLAGENT_HAS_QUICK3D
     void quick3DReachabilityIsAutomatic();
     void quick3DView3DIncludesSceneChildrenAutomatically();
+    void quick3DDiagnosticsReportSceneSetupIssues();
 #endif
     void scrollIntoViewAdjustsAncestorFlickable();
     void dismissPopupReportsNoVisiblePopup();
@@ -539,6 +540,15 @@ static bool selectorArrayContainsTypeValue(const QJsonArray &selectors, const QS
     return false;
 }
 
+static bool issueIdsContain(const QJsonArray &issues, const QString &id)
+{
+    for (const QJsonValue &issueValue : issues) {
+        if (issueValue.toObject().value(QStringLiteral("id")).toString() == id)
+            return true;
+    }
+    return false;
+}
+
 void tst_QQmlAgentInput::quick3DReachabilityIsAutomatic()
 {
     QQmlEngine engine;
@@ -893,6 +903,118 @@ Window {
     QVERIFY(!emptyNode.isEmpty());
     QCOMPARE(emptyNode.value(QStringLiteral("type")).toString(), QStringLiteral("View3D"));
     QCOMPARE(emptyNode.value(QStringLiteral("sceneKind")).toString(), QStringLiteral("QtQuick3D"));
+}
+
+void tst_QQmlAgentInput::quick3DDiagnosticsReportSceneSetupIssues()
+{
+    QQmlEngine engine;
+    QQmlComponent component(&engine);
+    component.setData(R"(
+import QtQuick
+import QtQuick.Window
+import QtQuick3D
+
+Window {
+    width: 320
+    height: 240
+    visible: false
+
+    View3D {
+        id: badView
+        objectName: "quick3d.diag.view"
+        anchors.fill: parent
+
+        Model {
+            id: flatCube
+            objectName: "quick3d.diag.flatCube"
+            source: "#Cube"
+            scale: Qt.vector3d(0, 1, 1)
+        }
+
+        Model {
+            id: texturedCube
+            objectName: "quick3d.diag.texturedCube"
+            source: "#Cube"
+            materials: PrincipledMaterial {
+                id: texturedMaterial
+                baseColorMap: Texture {
+                    id: missingTexture
+                    objectName: "quick3d.diag.missingTexture"
+                }
+            }
+        }
+    }
+
+    View3D {
+        id: authoredCameraView
+        objectName: "quick3d.diag.authoredCameraView"
+        width: 100
+        height: 100
+
+        PerspectiveCamera {
+            id: authoredSceneCamera
+            z: 600
+        }
+
+        DirectionalLight {
+            brightness: 1.0
+        }
+
+        Model {
+            source: "#Cube"
+            materials: PrincipledMaterial { baseColor: "#41cd52" }
+        }
+    }
+}
+)",
+                      QUrl(QStringLiteral("file:///tmp/Quick3DDiagnostics.qml")));
+
+    QScopedPointer<QObject> root(component.create());
+    QVERIFY2(root, qPrintable(component.errorString()));
+
+    const QJsonArray quick3DChecks{ QStringLiteral("quick3D") };
+    const QJsonArray viewIssues = QQmlAgentDiagnostics::analyzeNode({
+        { QStringLiteral("selector"), QStringLiteral("objectName=\"quick3d.diag.view\"") },
+        { QStringLiteral("checks"), quick3DChecks },
+    }).value(QStringLiteral("issues")).toArray();
+    QVERIFY2(issueIdsContain(viewIssues, QStringLiteral("quick3d.view_missing_camera")),
+             qPrintable(QJsonDocument(viewIssues).toJson(QJsonDocument::Compact)));
+    QVERIFY2(issueIdsContain(viewIssues, QStringLiteral("quick3d.scene_missing_light")),
+             qPrintable(QJsonDocument(viewIssues).toJson(QJsonDocument::Compact)));
+
+    const QJsonArray authoredCameraViewIssues = QQmlAgentDiagnostics::analyzeNode({
+        { QStringLiteral("selector"),
+          QStringLiteral("objectName=\"quick3d.diag.authoredCameraView\"") },
+        { QStringLiteral("checks"), quick3DChecks },
+    }).value(QStringLiteral("issues")).toArray();
+    QVERIFY2(!issueIdsContain(authoredCameraViewIssues,
+                              QStringLiteral("quick3d.view_missing_camera")),
+             qPrintable(QJsonDocument(authoredCameraViewIssues).toJson(QJsonDocument::Compact)));
+
+    const QJsonArray flatCubeIssues = QQmlAgentDiagnostics::analyzeNode({
+        { QStringLiteral("selector"), QStringLiteral("objectName=\"quick3d.diag.flatCube\"") },
+        { QStringLiteral("checks"), quick3DChecks },
+    }).value(QStringLiteral("issues")).toArray();
+    QVERIFY2(issueIdsContain(flatCubeIssues, QStringLiteral("quick3d.model_missing_material")),
+             qPrintable(QJsonDocument(flatCubeIssues).toJson(QJsonDocument::Compact)));
+    QVERIFY2(issueIdsContain(flatCubeIssues, QStringLiteral("quick3d.model_degenerate_scale")),
+             qPrintable(QJsonDocument(flatCubeIssues).toJson(QJsonDocument::Compact)));
+
+    const QJsonArray textureIssues = QQmlAgentDiagnostics::analyzeNode({
+        { QStringLiteral("selector"), QStringLiteral("objectName=\"quick3d.diag.missingTexture\"") },
+        { QStringLiteral("checks"), quick3DChecks },
+    }).value(QStringLiteral("issues")).toArray();
+    QVERIFY2(issueIdsContain(textureIssues, QStringLiteral("quick3d.texture_missing_source")),
+             qPrintable(QJsonDocument(textureIssues).toJson(QJsonDocument::Compact)));
+
+    const QJsonObject summary = QQmlAgentDiagnostics::analyzeTree({
+        { QStringLiteral("checks"), quick3DChecks },
+        { QStringLiteral("includeInvisible"), true },
+        { QStringLiteral("verbosity"), QStringLiteral("summary") },
+    }).value(QStringLiteral("summary")).toObject();
+    const QJsonArray ran = summary.value(QStringLiteral("ran")).toArray();
+    QVERIFY2(jsonArrayContainsString(ran, QStringLiteral("quick3D")),
+             qPrintable(QJsonDocument(summary).toJson(QJsonDocument::Compact)));
 }
 #endif
 

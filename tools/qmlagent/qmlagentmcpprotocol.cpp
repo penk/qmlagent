@@ -235,7 +235,7 @@ QJsonArray toolList()
              QStringLiteral("Unsubscribe from QmlAgent UI.treeChanged events on this persistent connection."),
              schema({})),
         tool(QStringLiteral("qmlagent_diagnostics_analyze_tree"),
-             QStringLiteral("Analyze the runtime tree for structured layout/input/log issues. Defaults to application repair scope. Use verbosity:\"summary\" for bounded agent-loop output; use evidence/full only when patch-ready detail is needed. Pass includeFrameworkIssues:true or issueScope:\"all\" when developing Qt Quick Controls/framework internals."),
+             QStringLiteral("Analyze the runtime tree for structured layout/input/log issues. Defaults to application repair scope. Use verbosity:\"summary\" for bounded agent-loop output; use evidence/full only when patch-ready detail is needed. When capabilities.qtQuick3D.enabled is true, pass checks:[\"quick3D\"] to focus on View3D camera/light setup, Model material/scale, texture source, and render3D-backed frustum evidence. Pass includeFrameworkIssues:true or issueScope:\"all\" when developing Qt Quick Controls/framework internals."),
              schema({
                  { QStringLiteral("includeInvisible"), QJsonObject{ { QStringLiteral("type"), QStringLiteral("boolean") } } },
                  { QStringLiteral("includeFrameworkIssues"), QJsonObject{ { QStringLiteral("type"), QStringLiteral("boolean") } } },
@@ -255,7 +255,7 @@ QJsonArray toolList()
                  } },
              })),
         tool(QStringLiteral("qmlagent_diagnostics_analyze_node"),
-             QStringLiteral("Analyze one node by selector or nodeId and return evidence-backed issues."),
+             QStringLiteral("Analyze one node by selector or nodeId and return evidence-backed issues. For QtQuick3D nodes, pass checks:[\"quick3D\"] to focus on View3D camera/light setup, Model material/scale, texture source, and render3D-backed frustum evidence."),
              schema(withNodeRef({ { QStringLiteral("checks"), stringArray } }))),
         tool(QStringLiteral("qmlagent_diagnostics_analyze_binding"),
              QStringLiteral("Resolve runtime binding provenance for one property. Use this when geometry/state looks computed: it reports active QQmlBinding or Qt bindable-property binding evidence, current value, source location, bounded source snippet, candidate identifier follow-up hints, currently captured dependency values when Qt exposes them, and bindable-property dependency summaries when values are not exposed. Start from result.assignmentSite: it is the ranked answer to \"which file:line do I edit to change this value\" for both live bindings and literal assignments; the provenance dossier is for verification. Source-token identifiers are hints, not dependency proof. This is structured repair evidence; it does not mutate the app."),

@@ -4,6 +4,7 @@
 #include "qqmlagentdiagnostics_p.h"
 
 #include "qqmlagentactionability_p.h"
+#include "qqmlagentjsonutils_p.h"
 #include "qqmlagentlogcollector_p.h"
 #include "qqmlagentsourceresolver_p.h"
 #include "qqmlagentuitree_p.h"
@@ -15,9 +16,15 @@
 #include <QtCore/qstringlist.h>
 #include <QtCore/qvariant.h>
 #include <QtCore/qvector.h>
+#include <QtGui/qvector3d.h>
 #include <QtQuick/qquickitem.h>
 #include <QtQuick/qquickwindow.h>
 #include <QtQuick/private/qquickrepeater_p.h>
+#include <QtQml/qqmllist.h>
+
+#ifdef QMLAGENT_HAS_QUICK3D
+#include <QtQuick3D/qquick3dobject.h>
+#endif
 
 #include <algorithm>
 
@@ -616,6 +623,9 @@ static QSet<QString> requestedChecks(const QJsonObject &params)
             check = QStringLiteral("actionable");
         else if (check == QLatin1String("text.elide"))
             check = QStringLiteral("textElided");
+        else if (check == QLatin1String("quick3d") || check == QLatin1String("quick3D")
+                 || check == QLatin1String("quick3d.scene"))
+            check = QStringLiteral("quick3D");
         if (!check.isEmpty())
             checks.insert(check);
     }
@@ -700,6 +710,7 @@ static QJsonArray ranChecks(const QSet<QString> &checks)
         QStringLiteral("layout.overlap"),
         QStringLiteral("input.actionability"),
         QStringLiteral("text.elide"),
+        QStringLiteral("quick3D"),
         QStringLiteral("log.entries"),
     };
     if (checks.isEmpty())
@@ -720,6 +731,8 @@ static QJsonArray ranChecks(const QSet<QString> &checks)
     }
     if (checks.contains(QStringLiteral("textElided")))
         ran.append(QStringLiteral("text.elide"));
+    if (checks.contains(QStringLiteral("quick3D")))
+        ran.append(QStringLiteral("quick3D"));
     if (checks.contains(QStringLiteral("log.entries")))
         ran.append(QStringLiteral("log.entries"));
     return ran;
@@ -990,6 +1003,360 @@ QJsonObject QQmlAgentDiagnostics::selectorNotFound(const QString &kind, const QS
     };
 }
 
+static bool isQuick3DCheckRequested(const QSet<QString> &checks)
+{
+    return checks.isEmpty() || checks.contains(QStringLiteral("quick3D"));
+}
+
+static bool isQuick3DViewportObject(QObject *object)
+{
+    return object && object->inherits("QQuick3DViewport");
+}
+
+static bool isQuick3DModelObject(QObject *object)
+{
+    return object && object->inherits("QQuick3DModel");
+}
+
+static bool isQuick3DLightObject(QObject *object)
+{
+    if (!object)
+        return false;
+    const QString className = QString::fromUtf8(object->metaObject()->className());
+    return object->inherits("QQuick3DAbstractLight")
+            || className.endsWith(QLatin1String("Light"));
+}
+
+static bool isQuick3DCameraObject(QObject *object)
+{
+    if (!object)
+        return false;
+    const QString className = QString::fromUtf8(object->metaObject()->className());
+    return object->inherits("QQuick3DCamera")
+            || className.endsWith(QLatin1String("Camera"));
+}
+
+static bool isQuick3DTextureObject(QObject *object)
+{
+    return object && object->inherits("QQuick3DTexture");
+}
+
+static QObject *objectPropertyObject(QObject *object, const char *name)
+{
+    if (!object || object->metaObject()->indexOfProperty(name) < 0)
+        return nullptr;
+    const QVariant value = object->property(name);
+    if (!value.canConvert<QObject *>())
+        return nullptr;
+    return qvariant_cast<QObject *>(value);
+}
+
+static QJsonValue quick3DPropertyEvidence(QObject *object, const char *name)
+{
+    if (!object || object->metaObject()->indexOfProperty(name) < 0)
+        return QJsonValue();
+    return QQmlAgentJsonUtils::valueFromVariant(object->property(name));
+}
+
+static void appendUniqueObject(QVector<QObject *> *objects, QSet<QObject *> *seen, QObject *object)
+{
+    if (!object || seen->contains(object))
+        return;
+    seen->insert(object);
+    objects->append(object);
+}
+
+static QVector<QObject *> quick3DChildObjects(QObject *object)
+{
+    QVector<QObject *> children;
+    QSet<QObject *> seen;
+
+#ifdef QMLAGENT_HAS_QUICK3D
+    if (auto *quick3DObject = qobject_cast<QQuick3DObject *>(object)) {
+        const QList<QQuick3DObject *> childItems = quick3DObject->childItems();
+        for (QQuick3DObject *child : childItems)
+            appendUniqueObject(&children, &seen, child);
+    }
+#endif
+
+    for (QObject *child : object ? object->children() : QObjectList()) {
+        if (child->inherits("QQuick3DObject") || child->inherits("QQuick3DTexture")
+            || child->inherits("QQuick3DMaterial")) {
+            appendUniqueObject(&children, &seen, child);
+        }
+    }
+    return children;
+}
+
+static bool quick3DSceneContains(QObject *object, bool (*predicate)(QObject *),
+                                 QSet<QObject *> *visited = nullptr)
+{
+    QSet<QObject *> localVisited;
+    if (!visited)
+        visited = &localVisited;
+    if (!object || visited->contains(object))
+        return false;
+    visited->insert(object);
+    if (predicate(object))
+        return true;
+
+    for (QObject *child : quick3DChildObjects(object)) {
+        if (quick3DSceneContains(child, predicate, visited))
+            return true;
+    }
+    return false;
+}
+
+static QVector<QObject *> quick3DViewportSceneRoots(QObject *viewport)
+{
+    QVector<QObject *> roots;
+    QSet<QObject *> seen;
+    appendUniqueObject(&roots, &seen, objectPropertyObject(viewport, "scene"));
+    appendUniqueObject(&roots, &seen, objectPropertyObject(viewport, "importScene"));
+    for (QObject *child : quick3DChildObjects(viewport))
+        appendUniqueObject(&roots, &seen, child);
+    return roots;
+}
+
+static bool quick3DViewportHasSceneModels(QObject *viewport)
+{
+    for (QObject *root : quick3DViewportSceneRoots(viewport)) {
+        if (quick3DSceneContains(root, isQuick3DModelObject))
+            return true;
+    }
+    return false;
+}
+
+static bool quick3DViewportHasLights(QObject *viewport)
+{
+    for (QObject *root : quick3DViewportSceneRoots(viewport)) {
+        if (quick3DSceneContains(root, isQuick3DLightObject))
+            return true;
+    }
+    return false;
+}
+
+static bool quick3DViewportHasCameras(QObject *viewport)
+{
+    for (QObject *root : quick3DViewportSceneRoots(viewport)) {
+        if (quick3DSceneContains(root, isQuick3DCameraObject))
+            return true;
+    }
+    return false;
+}
+
+static int quick3DMaterialCount(QObject *model, bool *readable)
+{
+    *readable = false;
+    QQmlListReference reference(model, "materials");
+    if (reference.isValid() && reference.isReadable()) {
+        *readable = true;
+        return int(reference.count());
+    }
+
+    const QVariant value = model ? model->property("materials") : QVariant();
+    if (value.canConvert<QObjectList>()) {
+        *readable = true;
+        return qvariant_cast<QObjectList>(value).size();
+    }
+    return 0;
+}
+
+static bool vector3DProperty(QObject *object, const char *name, QVector3D *value)
+{
+    if (!object || object->metaObject()->indexOfProperty(name) < 0)
+        return false;
+    const QVariant variant = object->property(name);
+    if (!variant.canConvert<QVector3D>())
+        return false;
+    *value = qvariant_cast<QVector3D>(variant);
+    return true;
+}
+
+static bool isDegenerateScale(const QVector3D &scale)
+{
+    static constexpr float DegenerateScaleThreshold = 0.0001f;
+    return qAbs(scale.x()) <= DegenerateScaleThreshold
+            || qAbs(scale.y()) <= DegenerateScaleThreshold
+            || qAbs(scale.z()) <= DegenerateScaleThreshold;
+}
+
+static bool textureHasUsableSource(QObject *texture)
+{
+    const QVariant source = texture ? texture->property("source") : QVariant();
+    if (source.metaType().id() == QMetaType::QUrl && !source.toUrl().isEmpty())
+        return true;
+    if (source.canConvert<QString>() && !source.toString().isEmpty())
+        return true;
+    return objectPropertyObject(texture, "sourceItem");
+}
+
+static void appendQuick3DNodeDiagnostics(QObject *object, int nodeId,
+                                         const QJsonObject &source,
+                                         const QSet<QString> &checks,
+                                         QJsonArray *issues)
+{
+    if (!isQuick3DCheckRequested(checks) || !object)
+        return;
+
+    if (isQuick3DViewportObject(object) && quick3DViewportHasSceneModels(object)) {
+        const bool hasActiveCamera = objectPropertyObject(object, "camera");
+        const bool hasAuthoredSceneCamera = quick3DViewportHasCameras(object);
+        if (!hasActiveCamera && !hasAuthoredSceneCamera) {
+            QJsonObject cameraIssue = issue(
+                    QStringLiteral("quick3d.view_missing_camera"), QStringLiteral("error"),
+                    0.95, nodeId,
+                    QStringLiteral("View3D contains model content but no active or authored scene camera was found."),
+                    { QStringLiteral("activeCamera=false"),
+                      QStringLiteral("authoredSceneCamera=false"),
+                      QStringLiteral("sceneContainsModel=true") },
+                    source);
+            cameraIssue.insert(QStringLiteral("evidenceProfile"),
+                               evidenceProfile(QStringLiteral("quick3d-view-properties"),
+                                               QStringLiteral("View3D camera property plus scene graph traversal for authored camera nodes"),
+                                               {
+                                                   QStringLiteral("does not inspect renderer fallback state"),
+                                                   QStringLiteral("an active camera may be auto-assigned after a render pass"),
+                                                   QStringLiteral("scene content is determined from public Quick3D child traversal and QObject children"),
+                                               }));
+            cameraIssue.insert(QStringLiteral("repairHints"), QJsonArray{
+                repairHint(QStringLiteral("assign-view3d-camera"), 0.90,
+                           QStringLiteral("Models in a View3D need a camera to produce meaningful render-space evidence."),
+                           {
+                               { QStringLiteral("suggestedDirection"), QStringLiteral("set View3D.camera to an authored Camera node") },
+                           }),
+            });
+            issues->append(cameraIssue);
+        }
+
+        if (!quick3DViewportHasLights(object)) {
+            QJsonObject lightIssue = issue(
+                    QStringLiteral("quick3d.scene_missing_light"), QStringLiteral("warning"),
+                    0.60, nodeId,
+                    QStringLiteral("View3D model scene has no authored light."),
+                    { QStringLiteral("sceneContainsModel=true"),
+                      QStringLiteral("authoredLightFound=false") },
+                    source);
+            lightIssue.insert(QStringLiteral("evidenceProfile"),
+                              evidenceProfile(QStringLiteral("quick3d-scene-traversal"),
+                                              QStringLiteral("Quick3D scene graph traversal looking for light nodes"),
+                                              {
+                                                  QStringLiteral("environment lighting, emissive materials, or custom shaders can make a scene visible without authored light nodes"),
+                                                  QStringLiteral("does not prove final raster darkness"),
+                                              }));
+            lightIssue.insert(QStringLiteral("repairHints"), QJsonArray{
+                repairHint(QStringLiteral("inspect-scene-lighting"), 0.55,
+                           QStringLiteral("Missing lights are a common reason model geometry appears black or flat."),
+                           {
+                               { QStringLiteral("suggestedDirection"), QStringLiteral("add or verify DirectionalLight, PointLight, SpotLight, or environment lighting") },
+                           }),
+            });
+            issues->append(lightIssue);
+        }
+    }
+
+    if (isQuick3DModelObject(object)) {
+        bool readableMaterials = false;
+        const int materialCount = quick3DMaterialCount(object, &readableMaterials);
+        if (readableMaterials && materialCount == 0) {
+            QJsonObject materialIssue = issue(
+                    QStringLiteral("quick3d.model_missing_material"), QStringLiteral("warning"),
+                    0.75, nodeId,
+                    QStringLiteral("Quick3D Model has no assigned materials."),
+                    { QStringLiteral("materials.count=0") },
+                    source);
+            materialIssue.insert(QStringLiteral("evidenceProfile"),
+                                 evidenceProfile(QStringLiteral("quick3d-model-properties"),
+                                                 QStringLiteral("Model materials list count"),
+                                                 {
+                                                     QStringLiteral("default materials or custom render paths may still display geometry"),
+                                                     QStringLiteral("does not prove final raster invisibility"),
+                                                 }));
+            materialIssue.insert(QStringLiteral("repairHints"), QJsonArray{
+                repairHint(QStringLiteral("assign-model-material"), 0.70,
+                           QStringLiteral("Material assignment is usually required for useful Quick3D model rendering."),
+                           {
+                               { QStringLiteral("suggestedDirection"), QStringLiteral("set Model.materials to an authored material") },
+                           }),
+            });
+            issues->append(materialIssue);
+        }
+
+        QVector3D scale;
+        if (vector3DProperty(object, "scale", &scale) && isDegenerateScale(scale)) {
+            QJsonObject scaleIssue = issue(
+                    QStringLiteral("quick3d.model_degenerate_scale"), QStringLiteral("error"),
+                    0.95, nodeId,
+                    QStringLiteral("Quick3D Model has a zero or near-zero scale axis."),
+                    { QStringLiteral("scale.x=%1").arg(scale.x()),
+                      QStringLiteral("scale.y=%1").arg(scale.y()),
+                      QStringLiteral("scale.z=%1").arg(scale.z()),
+                      QStringLiteral("zeroScaleThreshold=0.0001") },
+                    source);
+            scaleIssue.insert(QStringLiteral("evidenceProfile"),
+                              evidenceProfile(QStringLiteral("quick3d-transform-property"),
+                                              QStringLiteral("Model scale property"),
+                                              {
+                                                  QStringLiteral("does not account for parent transforms or custom geometry shaders"),
+                                              }));
+            attachBindingProvenance(&scaleIssue, object, { QStringLiteral("scale") });
+            issues->append(scaleIssue);
+        }
+
+        const QJsonObject node = QQmlAgentUiTree::nodeForObject(
+                object, 0, 0, true, true, { QStringLiteral("render3D") });
+        const QJsonObject render3D = node.value(QStringLiteral("render3D")).toObject();
+        if (render3D.value(QStringLiteral("available")).toBool(false)
+            && !render3D.value(QStringLiteral("inFrustum")).toBool(true)) {
+            QJsonObject frustumIssue = issue(
+                    QStringLiteral("quick3d.model_outside_frustum"), QStringLiteral("warning"),
+                    0.80, nodeId,
+                    QStringLiteral("Quick3D Model bounds are outside the active camera frustum."),
+                    { QStringLiteral("render3D.inFrustum=false"),
+                      QStringLiteral("render3D.projection.available=true") },
+                    source);
+            frustumIssue.insert(QStringLiteral("render3D"), render3D);
+            frustumIssue.insert(QStringLiteral("evidenceProfile"),
+                                evidenceProfile(QStringLiteral("quick3d-projection"),
+                                                QStringLiteral("world-space bounds projected through View3D mapFrom3DScene"),
+                                                {
+                                                    QStringLiteral("geometric evidence only; does not prove raster visibility, occlusion, material opacity, or depth/culling state"),
+                                                }));
+            issues->append(frustumIssue);
+        }
+    }
+
+    if (isQuick3DTextureObject(object) && !textureHasUsableSource(object)) {
+        QJsonArray evidence{
+            QStringLiteral("source empty"),
+            QStringLiteral("sourceItem=null"),
+        };
+        const QJsonValue sourceEvidence = quick3DPropertyEvidence(object, "source");
+        if (!sourceEvidence.isUndefined())
+            evidence.append(QStringLiteral("source=%1").arg(sourceEvidence.toString()));
+        QJsonObject textureIssue = issue(
+                QStringLiteral("quick3d.texture_missing_source"), QStringLiteral("warning"),
+                0.75, nodeId,
+                QStringLiteral("Quick3D Texture has no source URL or sourceItem."),
+                evidence, source);
+        textureIssue.insert(QStringLiteral("evidenceProfile"),
+                            evidenceProfile(QStringLiteral("quick3d-texture-properties"),
+                                            QStringLiteral("Texture source and sourceItem properties"),
+                                            {
+                                                QStringLiteral("procedural or backend-provided texture data may not expose source/sourceItem"),
+                                                QStringLiteral("does not prove final raster output is missing"),
+                                            }));
+        textureIssue.insert(QStringLiteral("repairHints"), QJsonArray{
+            repairHint(QStringLiteral("assign-texture-source"), 0.65,
+                       QStringLiteral("Texture references are easier to repair when they point at a source URL or sourceItem."),
+                       {
+                           { QStringLiteral("suggestedDirection"), QStringLiteral("set Texture.source or Texture.sourceItem") },
+                       }),
+        });
+        issues->append(textureIssue);
+    }
+}
+
 QJsonObject QQmlAgentDiagnostics::analyzeNode(const QJsonObject &params)
 {
     const QQmlAgentUiTree::NodeRef ref = QQmlAgentUiTree::resolveNodeRef(params);
@@ -1012,18 +1379,20 @@ QJsonObject QQmlAgentDiagnostics::analyzeNode(const QJsonObject &params)
         return { { QStringLiteral("issues"), issues } };
     }
 
+    const QJsonObject source = QQmlAgentSourceResolver::sourceLocationForObject(object);
     if (!item) {
+        appendQuick3DNodeDiagnostics(object, nodeId, source, checks, &issues);
         if (actionableCheck) {
             issues.append(issue(QStringLiteral("input.not_actionable"), QStringLiteral("error"),
                                 1.0, nodeId, QStringLiteral("Node is not currently actionable."),
                                 { QStringLiteral("not_qquickitem") },
-                                QQmlAgentSourceResolver::sourceLocationForObject(object)));
+                                source));
         }
         if (clickableCheck) {
             issues.append(issue(QStringLiteral("input.not_clickable"), QStringLiteral("error"), 1.0,
                                 nodeId, QStringLiteral("Node is not a QQuickItem."),
                                 { QStringLiteral("not_qquickitem") },
-                                QQmlAgentSourceResolver::sourceLocationForObject(object)));
+                                source));
         }
         return {
             { QStringLiteral("node"), ref.node },
@@ -1031,7 +1400,6 @@ QJsonObject QQmlAgentDiagnostics::analyzeNode(const QJsonObject &params)
         };
     }
 
-    const QJsonObject source = QQmlAgentSourceResolver::sourceLocationForObject(object);
     if (actionableCheck) {
         const QJsonArray reasons = QQmlAgentActionability::reasons(object);
         if (!reasons.isEmpty()) {
@@ -1352,6 +1720,8 @@ QJsonObject QQmlAgentDiagnostics::analyzeNode(const QJsonObject &params)
             issues.append(ancestorIssue);
         }
     }
+
+    appendQuick3DNodeDiagnostics(object, nodeId, source, checks, &issues);
 
     return {
         { QStringLiteral("node"), ref.node },

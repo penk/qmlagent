@@ -303,6 +303,9 @@ void tst_QQmlAgentProtocol::mcpToolSchemasExposeAgentFirstContracts()
 
     const QJsonObject diagnosticsTree = mcpToolByName(QStringLiteral("qmlagent_diagnostics_analyze_tree"));
     QVERIFY(!diagnosticsTree.isEmpty());
+    QVERIFY2(diagnosticsTree.value(QStringLiteral("description")).toString()
+                    .contains(QStringLiteral("checks:[\"quick3D\"]")),
+             qPrintable(QJsonDocument(diagnosticsTree).toJson(QJsonDocument::Compact)));
     const QJsonObject diagnosticsProperties = diagnosticsTree.value(QStringLiteral("inputSchema"))
             .toObject().value(QStringLiteral("properties")).toObject();
     QCOMPARE(diagnosticsProperties.value(QStringLiteral("verbosity")).toObject()
