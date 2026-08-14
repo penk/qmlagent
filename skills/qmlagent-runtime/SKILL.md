@@ -142,6 +142,16 @@ Use `qmlagent_render_pick3d` or `Render.pick3D` on a `View3D` selector for
 read-only hit-test evidence at a View3D-local coordinate; it does not deliver
 input events.
 
+For QtCanvasPainter applications, a queried node that reports
+`renderKind:"QtCanvasPainter"` is an application `QCanvasPainterItem`
+subclass. Explicitly request the natural paint-state properties it exposes.
+QmlAgent serializes public brushes, gradients, patterns, shadows, images, and
+bounded path endpoint evidence. Treat these values, and any app-provided
+`QVariantMap` operation log, as application-reported state rather than an
+observed draw-call stream. The public CanvasPainter API does not expose the
+retained command sequence, custom-brush shader/data payloads, or original image
+filenames.
+
 On an input result, `delivered:true` is the action-success signal. The nested
 `settle` object is render-loop-only (`verificationRole: render-loop-settle-only`):
 `settle.ok:false` with `frame_not_observed_before_timeout` just means the click

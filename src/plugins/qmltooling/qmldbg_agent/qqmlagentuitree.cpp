@@ -1421,6 +1421,9 @@ static QJsonObject nodeForObjectInternal(QObject *object, int windowId, int dept
                                       : QStringLiteral("QObject")));
     if (quick3DObject || quick3DViewport)
         insertField(&node, options, QStringLiteral("sceneKind"), QStringLiteral("QtQuick3D"));
+    if (object->inherits("QCanvasPainterItem"))
+        insertField(&node, options, QStringLiteral("renderKind"),
+                    QStringLiteral("QtCanvasPainter"));
     insertField(&node, options, QStringLiteral("type"), typeName);
     // Native style renderer items register under control type names
     // (NativeStyle.CheckBox); expose the distinction as evidence (F-007).

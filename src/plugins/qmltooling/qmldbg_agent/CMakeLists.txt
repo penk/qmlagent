@@ -8,6 +8,7 @@ qt_add_plugin(QQmlAgentServiceFactoryPlugin
 
 target_sources(QQmlAgentServiceFactoryPlugin PRIVATE
     qqmlagentactionability.cpp qqmlagentactionability_p.h
+    qqmlagentcanvaspainter.cpp qqmlagentcanvaspainter_p.h
     qqmlagentdiagnostics.cpp qqmlagentdiagnostics_p.h
     qqmlagentinput.cpp qqmlagentinput_p.h
     qqmlagentinputdriver.cpp qqmlagentinputdriver_p.h
@@ -37,6 +38,11 @@ target_link_libraries(QQmlAgentServiceFactoryPlugin PRIVATE
 if(TARGET Qt6::Quick3D)
     target_compile_definitions(QQmlAgentServiceFactoryPlugin PRIVATE QMLAGENT_HAS_QUICK3D)
     target_link_libraries(QQmlAgentServiceFactoryPlugin PRIVATE Qt6::Quick3D)
+endif()
+
+if(TARGET Qt6::CanvasPainter)
+    target_compile_definitions(QQmlAgentServiceFactoryPlugin PRIVATE QMLAGENT_HAS_CANVASPAINTER)
+    target_link_libraries(QQmlAgentServiceFactoryPlugin PRIVATE Qt6::CanvasPainter)
 endif()
 
 set(qmlagent_build_plugin_dir "${CMAKE_BINARY_DIR}/plugins/qmltooling")

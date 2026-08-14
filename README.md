@@ -264,6 +264,23 @@ Request `fields:["render3D"]` for model bounds and projection evidence, run
 diagnostics with `checks:["quick3D"]` for focused scene issues, and use
 `qmlagent_render_pick3d` or `Render.pick3D` for read-only View3D hit testing.
 
+## QtCanvasPainter
+
+QmlAgent tags application-specific `QCanvasPainterItem` subclasses with
+`renderKind:"QtCanvasPainter"` in `UI.getTree` and `UI.query`. When CMake
+finds `Qt6::CanvasPainter`, request the paint-state properties an application
+already exposes to inspect structured brushes, gradients, patterns, shadows,
+images, and bounded path endpoint evidence through the normal property path.
+
+This evidence describes application-exposed state, not paint commands observed
+by QmlAgent. CanvasPainter's public API does not expose its retained draw-call
+sequence, custom-brush shader/data payloads, or original image filenames. An
+application that needs richer semantic evidence can expose the same natural
+state its renderer consumes, or a bounded `QVariantMap` operation log, as a
+Q_PROPERTY. Such a log remains application-reported evidence; independently
+observed paint execution requires an upstream CanvasPainter trace callback
+before tessellation.
+
 ## Shell Fallback
 
 Use `qmlagentctl` when MCP is unavailable or a shell command is simpler:

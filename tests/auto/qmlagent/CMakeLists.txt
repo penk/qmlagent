@@ -46,6 +46,7 @@ add_test(NAME qmlagentprotocol
 qt_add_executable(tst_qmlagentinput
     tst_qmlagentinput.cpp
     ${PROJECT_SOURCE_DIR}/src/plugins/qmltooling/qmldbg_agent/qqmlagentactionability.cpp
+    ${PROJECT_SOURCE_DIR}/src/plugins/qmltooling/qmldbg_agent/qqmlagentcanvaspainter.cpp
     ${PROJECT_SOURCE_DIR}/src/plugins/qmltooling/qmldbg_agent/qqmlagentinput.cpp
     ${PROJECT_SOURCE_DIR}/src/plugins/qmltooling/qmldbg_agent/qqmlagentinputdriver.cpp
     ${PROJECT_SOURCE_DIR}/src/plugins/qmltooling/qmldbg_agent/qqmlagentjsonutils.cpp
@@ -77,6 +78,11 @@ target_link_libraries(tst_qmlagentinput PRIVATE
 if(TARGET Qt6::Quick3D)
     target_compile_definitions(tst_qmlagentinput PRIVATE QMLAGENT_HAS_QUICK3D)
     target_link_libraries(tst_qmlagentinput PRIVATE Qt6::Quick3D)
+endif()
+
+if(TARGET Qt6::CanvasPainter)
+    target_compile_definitions(tst_qmlagentinput PRIVATE QMLAGENT_HAS_CANVASPAINTER)
+    target_link_libraries(tst_qmlagentinput PRIVATE Qt6::CanvasPainter)
 endif()
 
 add_test(NAME qmlagentinput

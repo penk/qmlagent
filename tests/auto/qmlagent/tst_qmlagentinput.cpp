@@ -25,7 +25,108 @@
 #include <QtQml/qqmlengine.h>
 #include <QtTest/qtest.h>
 
+#ifdef QMLAGENT_HAS_CANVASPAINTER
+#include <QtCanvasPainter/qcanvasboxgradient.h>
+#include <QtCanvasPainter/qcanvasboxshadow.h>
+#include <QtCanvasPainter/qcanvasconicalgradient.h>
+#include <QtCanvasPainter/qcanvascustombrush.h>
+#include <QtCanvasPainter/qcanvasgridpattern.h>
+#include <QtCanvasPainter/qcanvasimagepattern.h>
+#include <QtCanvasPainter/qcanvaslineargradient.h>
+#include <QtCanvasPainter/qcanvasoffscreencanvas.h>
+#include <QtCanvasPainter/qcanvaspainteritem.h>
+#include <QtCanvasPainter/qcanvaspainteritemrenderer.h>
+#include <QtCanvasPainter/qcanvaspath.h>
+#include <QtCanvasPainter/qcanvasradialgradient.h>
+#endif
+
 QT_USE_NAMESPACE
+
+#ifdef QMLAGENT_HAS_CANVASPAINTER
+class CanvasPainterFixtureRenderer final : public QCanvasPainterItemRenderer
+{
+protected:
+    void paint(QCanvasPainter *) override { }
+};
+
+class CanvasPainterFixtureItem final : public QCanvasPainterItem
+{
+    Q_OBJECT
+    Q_PROPERTY(QVariant boxShadow READ boxShadow CONSTANT)
+    Q_PROPERTY(QVariant path READ path CONSTANT)
+    Q_PROPERTY(QVariant linearGradient READ linearGradient CONSTANT)
+    Q_PROPERTY(QVariant radialGradient READ radialGradient CONSTANT)
+    Q_PROPERTY(QVariant conicalGradient READ conicalGradient CONSTANT)
+    Q_PROPERTY(QVariant boxGradient READ boxGradient CONSTANT)
+    Q_PROPERTY(QVariant baseGradient READ baseGradient CONSTANT)
+    Q_PROPERTY(QVariant image READ image CONSTANT)
+    Q_PROPERTY(QVariant imagePattern READ imagePattern CONSTANT)
+    Q_PROPERTY(QVariant gridPattern READ gridPattern CONSTANT)
+    Q_PROPERTY(QVariant customBrush READ customBrush CONSTANT)
+    Q_PROPERTY(QVariant offscreenCanvas READ offscreenCanvas CONSTANT)
+    Q_PROPERTY(QVariant baseBrush READ baseBrush CONSTANT)
+
+public:
+    explicit CanvasPainterFixtureItem(QQuickItem *parent = nullptr)
+        : QCanvasPainterItem(parent),
+          m_boxShadow(QRectF(10, 20, 80, 40), 6, 8, QColor(QStringLiteral("#80402010"))),
+          m_linearGradient(QPointF(1, 2), QPointF(30, 40)),
+          m_radialGradient(QPointF(11, 12), 20, 3),
+          m_conicalGradient(QPointF(13, 14), 45),
+          m_boxGradient(QRectF(2, 4, 60, 30), 5, 7),
+          m_imagePattern(m_image, QRectF(3, 6, 24, 18), 15),
+          m_gridPattern(QRectF(4, 5, 12, 14), QColorConstants::Red,
+                        QColorConstants::Transparent, 2, 0.5f, 25),
+          m_baseBrush(m_boxShadow)
+    {
+        m_boxShadow.setSpread(3);
+        m_boxShadow.setTopLeftRadius(2);
+        m_linearGradient.setColorAt(0.0f, QColorConstants::Red);
+        m_linearGradient.setColorAt(1.0f, QColorConstants::Blue);
+        m_radialGradient.setColorAt(0.0f, QColorConstants::White);
+        m_radialGradient.setColorAt(1.0f, QColorConstants::Black);
+        m_customBrush.setTimeRunning(true);
+        m_offscreenCanvas.setFillColor(QColor(QStringLiteral("#334455")));
+        m_path.moveTo(0, 0);
+        for (int i = 1; i <= 39; ++i)
+            m_path.lineTo(float(i), float(i * 2));
+    }
+
+    QVariant boxShadow() const { return QVariant::fromValue(m_boxShadow); }
+    QVariant path() const { return QVariant::fromValue(m_path); }
+    QVariant linearGradient() const { return QVariant::fromValue(m_linearGradient); }
+    QVariant radialGradient() const { return QVariant::fromValue(m_radialGradient); }
+    QVariant conicalGradient() const { return QVariant::fromValue(m_conicalGradient); }
+    QVariant boxGradient() const { return QVariant::fromValue(m_boxGradient); }
+    QVariant baseGradient() const { return m_linearGradient.operator QVariant(); }
+    QVariant image() const { return QVariant::fromValue(m_image); }
+    QVariant imagePattern() const { return QVariant::fromValue(m_imagePattern); }
+    QVariant gridPattern() const { return QVariant::fromValue(m_gridPattern); }
+    QVariant customBrush() const { return QVariant::fromValue(m_customBrush); }
+    QVariant offscreenCanvas() const { return QVariant::fromValue(m_offscreenCanvas); }
+    QVariant baseBrush() const { return QVariant::fromValue(m_baseBrush); }
+
+protected:
+    QCanvasPainterItemRenderer *createItemRenderer() const override
+    {
+        return new CanvasPainterFixtureRenderer;
+    }
+
+private:
+    QCanvasBoxShadow m_boxShadow;
+    QCanvasPath m_path;
+    QCanvasLinearGradient m_linearGradient;
+    QCanvasRadialGradient m_radialGradient;
+    QCanvasConicalGradient m_conicalGradient;
+    QCanvasBoxGradient m_boxGradient;
+    QCanvasImage m_image;
+    QCanvasImagePattern m_imagePattern;
+    QCanvasGridPattern m_gridPattern;
+    QCanvasCustomBrush m_customBrush;
+    QCanvasOffscreenCanvas m_offscreenCanvas;
+    QCanvasBrush m_baseBrush;
+};
+#endif
 
 class tst_QQmlAgentInput : public QObject
 {
@@ -49,6 +150,9 @@ private slots:
     void windowObjectIsAddressable();
     void runtimeSetPropertyConvertsVector3D();
     void diagnosticsDefaultScanDoesNotFlagDisabledControls();
+#ifdef QMLAGENT_HAS_CANVASPAINTER
+    void canvasPainterItemAndValuesAreDiscoverable();
+#endif
 #ifdef QMLAGENT_HAS_QUICK3D
     void quick3DReachabilityIsAutomatic();
     void quick3DView3DIncludesSceneChildrenAutomatically();
@@ -575,6 +679,89 @@ static bool issueIdsContain(const QJsonArray &issues, const QString &id)
     }
     return false;
 }
+
+#ifdef QMLAGENT_HAS_CANVASPAINTER
+void tst_QQmlAgentInput::canvasPainterItemAndValuesAreDiscoverable()
+{
+    QQuickWindow window;
+    window.resize(200, 200);
+    CanvasPainterFixtureItem item(window.contentItem());
+    item.setObjectName(QStringLiteral("canvasPainter.fixture"));
+    item.setWidth(160);
+    item.setHeight(120);
+
+    const QStringList propertyNames{
+        QStringLiteral("boxShadow"),
+        QStringLiteral("path"),
+        QStringLiteral("linearGradient"),
+        QStringLiteral("radialGradient"),
+        QStringLiteral("conicalGradient"),
+        QStringLiteral("boxGradient"),
+        QStringLiteral("baseGradient"),
+        QStringLiteral("image"),
+        QStringLiteral("imagePattern"),
+        QStringLiteral("gridPattern"),
+        QStringLiteral("customBrush"),
+        QStringLiteral("offscreenCanvas"),
+        QStringLiteral("baseBrush"),
+    };
+    QJsonArray requestedProperties;
+    for (const QString &name : propertyNames)
+        requestedProperties.append(name);
+
+    const QJsonObject query = QQmlAgentUiTree::query({
+        { QStringLiteral("selector"), QStringLiteral("objectName=\"canvasPainter.fixture\"") },
+        { QStringLiteral("properties"), requestedProperties },
+    });
+    const QJsonArray matches = query.value(QStringLiteral("matches")).toArray();
+    QCOMPARE(matches.size(), 1);
+    const QJsonObject node = matches.at(0).toObject();
+    QCOMPARE(node.value(QStringLiteral("kind")).toString(), QStringLiteral("QQuickItem"));
+    QCOMPARE(node.value(QStringLiteral("renderKind")).toString(),
+             QStringLiteral("QtCanvasPainter"));
+
+    const QJsonObject properties = node.value(QStringLiteral("properties")).toObject();
+    for (const QString &name : propertyNames) {
+        const QJsonValue serialized = properties.value(name);
+        QVERIFY2(serialized.isObject(), qPrintable(name));
+        QCOMPARE(serialized.toObject().value(QStringLiteral("evidenceRole")).toString(),
+                 QStringLiteral("application-exposed-state"));
+    }
+
+    QCOMPARE(properties.value(QStringLiteral("boxShadow")).toObject()
+                     .value(QStringLiteral("brushType")).toString(),
+             QStringLiteral("boxShadow"));
+    const QJsonObject path = properties.value(QStringLiteral("path")).toObject();
+    QCOMPARE(path.value(QStringLiteral("commandCount")).toInt(), 40);
+    QCOMPARE(path.value(QStringLiteral("sampledCommandCount")).toInt(), 32);
+    QCOMPARE(path.value(QStringLiteral("omittedCommandCount")).toInt(), 8);
+    QCOMPARE(path.value(QStringLiteral("truncated")).toBool(), true);
+    QCOMPARE(path.value(QStringLiteral("endpointSamples")).toArray().size(), 32);
+    QVERIFY(!path.value(QStringLiteral("limitations")).toArray().isEmpty());
+
+    const QJsonObject linear = properties.value(QStringLiteral("linearGradient")).toObject();
+    QCOMPARE(linear.value(QStringLiteral("brushType")).toString(),
+             QStringLiteral("linearGradient"));
+    QCOMPARE(linear.value(QStringLiteral("startPosition")).toObject()
+                     .value(QStringLiteral("x")).toDouble(), 1.0);
+    QCOMPARE(linear.value(QStringLiteral("stops")).toArray().size(), 2);
+    QVERIFY(properties.value(QStringLiteral("baseGradient")).toObject()
+                    .contains(QStringLiteral("limitations")));
+
+    const QJsonObject image = properties.value(QStringLiteral("image")).toObject();
+    QCOMPARE(image.value(QStringLiteral("isNull")).toBool(), true);
+    QVERIFY(!image.value(QStringLiteral("limitations")).toArray().isEmpty());
+    QCOMPARE(properties.value(QStringLiteral("gridPattern")).toObject()
+                     .value(QStringLiteral("lineWidth")).toDouble(), 2.0);
+    QCOMPARE(properties.value(QStringLiteral("customBrush")).toObject()
+                     .value(QStringLiteral("timeRunning")).toBool(), true);
+    QVERIFY(properties.value(QStringLiteral("offscreenCanvas")).toObject()
+                    .value(QStringLiteral("limitations")).isArray());
+    QCOMPARE(properties.value(QStringLiteral("baseBrush")).toObject()
+                     .value(QStringLiteral("brushType")).toString(),
+             QStringLiteral("boxShadow"));
+}
+#endif
 
 void tst_QQmlAgentInput::diagnosticsDefaultScanDoesNotFlagDisabledControls()
 {

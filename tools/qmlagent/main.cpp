@@ -999,12 +999,14 @@ static void printMethodsHelp(const QStringList &methods, const QString &origin,
            << "  UI.query fields=render3D  Quick3D model world bounds, projected screen bounds, distance, and frustum evidence\n"
            << "  Diagnostics checks=quick3D  Quick3D camera/light/material/scale/texture/frustum evidence\n"
            << "  Render.pick3D            read-only View3D hit-test evidence for a viewport coordinate\n"
+           << "  UI.getTree / UI.query    tag QtCanvasPainter items and serialize requested app-exposed paint state\n"
            << "\nMCP/tool equivalents:\n"
            << "  qmlagent_ui_query_many\n"
            << "  qmlagent_input_scroll_into_view\n"
            << "  qmlagent_ui_get_tree / qmlagent_ui_query for QtQuick3D structural/source evidence; request fields=[\"render3D\"] for model projection evidence\n"
            << "  qmlagent_diagnostics_analyze_tree / qmlagent_diagnostics_analyze_node with checks=[\"quick3D\"] for Quick3D issue evidence\n"
-           << "  qmlagent_render_pick3d for read-only View3D hit-test evidence\n";
+           << "  qmlagent_render_pick3d for read-only View3D hit-test evidence\n"
+           << "  qmlagent_ui_get_tree / qmlagent_ui_query for QtCanvasPainter renderKind and app-exposed resource state; this is not an observed draw-call stream\n";
 }
 
 static int runCtlSubcommand(const QStringList &arguments)
@@ -1043,6 +1045,11 @@ static int runCtlSubcommand(const QStringList &arguments)
                 << "View3D-local first, then window logical pixels when the point lies\n"
                 << "inside the View3D. Pass --model-selector to use the targeted\n"
                 << "View3D.pick(x,y,model) overload.\n\n"
+                << "QtCanvasPainter: UI.getTree and UI.query tag app-specific\n"
+                << "QCanvasPainterItem subclasses with renderKind=\"QtCanvasPainter\".\n"
+                << "Request application-exposed paint-state properties to inspect brushes,\n"
+                << "gradients, patterns, shadows, images, and bounded path evidence. These\n"
+                << "properties describe application state, not an observed draw-call stream.\n\n"
                 << "Screenshot is fallback visual evidence. Use structural UI,\n"
                 << "diagnostics, source, log, and input/workflow evidence first;\n"
                 << "--include-data is opt-in to preserve agent context.\n"
@@ -1225,6 +1232,7 @@ static int runCtlSubcommand(const QStringList &arguments)
                     QStringLiteral("objectName"),
                     QStringLiteral("kind"),
                     QStringLiteral("sceneKind"),
+                    QStringLiteral("renderKind"),
                     QStringLiteral("properties"),
                 });
         } else if (command == QLatin1String("binding")) {
@@ -1790,6 +1798,7 @@ private:
                 QStringLiteral("objectName"),
                 QStringLiteral("kind"),
                 QStringLiteral("sceneKind"),
+                QStringLiteral("renderKind"),
                 QStringLiteral("type"),
                 QStringLiteral("text"),
                 QStringLiteral("bbox"),
@@ -1820,6 +1829,7 @@ private:
                 QStringLiteral("objectName"),
                 QStringLiteral("kind"),
                 QStringLiteral("sceneKind"),
+                QStringLiteral("renderKind"),
                 QStringLiteral("type"),
                 QStringLiteral("text"),
                 QStringLiteral("bbox"),
@@ -2577,6 +2587,8 @@ private:
             { QStringLiteral("tree"), QStringLiteral("qmlagent_ui_get_tree") },
             { QStringLiteral("qtQuick3D"),
               QStringLiteral("When target capabilities.qtQuick3D.enabled is true, qmlagent_ui_get_tree and qmlagent_ui_query include View3D scene Model/camera/light/material frontend nodes automatically; use them as structural/source evidence, not click targets. Request fields=[\"render3D\"] for Model projection evidence, checks=[\"quick3D\"] on diagnostics tools for camera/light/material/scale/texture/frustum issues, and qmlagent_render_pick3d for read-only View3D hit-test evidence.") },
+            { QStringLiteral("qtCanvasPainter"),
+              QStringLiteral("qmlagent_ui_get_tree and qmlagent_ui_query tag QCanvasPainterItem subclasses with renderKind=\"QtCanvasPainter\". Request app-exposed paint-state properties to inspect structured brushes, gradients, patterns, shadows, images, and bounded path evidence. This is application-reported state, not an independently observed draw-call stream.") },
             { QStringLiteral("quick3DDiagnostics"),
               QStringLiteral("qmlagent_diagnostics_analyze_tree or qmlagent_diagnostics_analyze_node with checks=[\"quick3D\"]") },
             { QStringLiteral("quick3DHitTest"), QStringLiteral("qmlagent_render_pick3d") },
@@ -2613,6 +2625,7 @@ private:
                 QStringLiteral("qmlagent_input_wheel Flickable ListView GridView TableView TreeView scroll"),
                 QStringLiteral("qmlagent_input_focus TextField TextArea before type text"),
                 QStringLiteral("qmlagent_render_pick3d QtQuick3D View3D pick hit test Model screen coordinate"),
+                QStringLiteral("qmlagent_ui_query QtCanvasPainter QCanvasPainterItem brush gradient pattern shadow path application paint state"),
                 QStringLiteral("qmlagent_render_capture_screenshot fallback visual evidence only structured first"),
             } },
             { QStringLiteral("fallbacks"), QJsonObject{

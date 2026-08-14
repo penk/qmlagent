@@ -262,6 +262,12 @@ void tst_QQmlAgentProtocol::mcpToolSchemasExposeAgentFirstContracts()
     QVERIFY2(getTree.value(QStringLiteral("description")).toString()
                     .contains(QStringLiteral("render3D")),
              qPrintable(QJsonDocument(getTree).toJson(QJsonDocument::Compact)));
+    QVERIFY2(getTree.value(QStringLiteral("description")).toString()
+                    .contains(QStringLiteral("renderKind=\"QtCanvasPainter\"")),
+             qPrintable(QJsonDocument(getTree).toJson(QJsonDocument::Compact)));
+    QVERIFY2(getTree.value(QStringLiteral("description")).toString()
+                    .contains(QStringLiteral("not an observed draw-call stream")),
+             qPrintable(QJsonDocument(getTree).toJson(QJsonDocument::Compact)));
     const QJsonObject query = mcpToolByName(QStringLiteral("qmlagent_ui_query"));
     QVERIFY(!query.isEmpty());
     QVERIFY(!query.value(QStringLiteral("inputSchema")).toObject()
@@ -272,6 +278,9 @@ void tst_QQmlAgentProtocol::mcpToolSchemasExposeAgentFirstContracts()
              qPrintable(QJsonDocument(query).toJson(QJsonDocument::Compact)));
     QVERIFY2(query.value(QStringLiteral("description")).toString()
                     .contains(QStringLiteral("projected screen bounds")),
+             qPrintable(QJsonDocument(query).toJson(QJsonDocument::Compact)));
+    QVERIFY2(query.value(QStringLiteral("description")).toString()
+                    .contains(QStringLiteral("app-exposed paint-state properties")),
              qPrintable(QJsonDocument(query).toJson(QJsonDocument::Compact)));
 
     const QJsonObject pick3D = mcpToolByName(QStringLiteral("qmlagent_render_pick3d"));

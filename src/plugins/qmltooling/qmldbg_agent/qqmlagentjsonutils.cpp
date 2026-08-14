@@ -3,6 +3,8 @@
 
 #include "qqmlagentjsonutils_p.h"
 
+#include "qqmlagentcanvaspainter_p.h"
+
 #include <QtCore/qjsonarray.h>
 #include <QtCore/qjsonobject.h>
 #include <QtCore/qmetaobject.h>
@@ -155,6 +157,10 @@ QJsonValue valueFromVariant(const QVariant &value)
 {
     if (!value.isValid())
         return QJsonValue();
+
+    const QJsonValue canvasPainterValue = QQmlAgentCanvasPainter::valueFromVariant(value);
+    if (!canvasPainterValue.isUndefined())
+        return canvasPainterValue;
 
     if (value.canConvert<QObject *>()) {
         if (QObject *object = qvariant_cast<QObject *>(value))
