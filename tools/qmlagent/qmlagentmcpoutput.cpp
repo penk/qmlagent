@@ -14,7 +14,6 @@ static QJsonObject summarizedNode(const QJsonObject &node)
              QStringLiteral("qmlId"),
              QStringLiteral("objectName"),
              QStringLiteral("kind"),
-             QStringLiteral("sceneKind"),
              QStringLiteral("renderKind"),
              QStringLiteral("type"),
              QStringLiteral("text"),

@@ -936,7 +936,7 @@ Window {
         { QStringLiteral("fields"), QJsonArray{
             QStringLiteral("nodeId"),
             QStringLiteral("kind"),
-            QStringLiteral("sceneKind"),
+            QStringLiteral("renderKind"),
             QStringLiteral("type"),
             QStringLiteral("typeAliases"),
             QStringLiteral("qmlId"),
@@ -957,7 +957,7 @@ Window {
     QCOMPARE(matches.size(), 1);
     const QJsonObject model = matches.at(0).toObject();
     QCOMPARE(model.value(QStringLiteral("kind")).toString(), QStringLiteral("QQuick3DObject"));
-    QCOMPARE(model.value(QStringLiteral("sceneKind")).toString(), QStringLiteral("QtQuick3D"));
+    QVERIFY(!model.contains(QStringLiteral("renderKind")));
     QCOMPARE(model.value(QStringLiteral("type")).toString(), QStringLiteral("Model"));
     const QJsonArray typeAliases = model.value(QStringLiteral("typeAliases")).toArray();
     QVERIFY(!jsonArrayContainsString(typeAliases, QStringLiteral("3DModel")));
@@ -1222,7 +1222,7 @@ Window {
         { QStringLiteral("fields"), QJsonArray{
             QStringLiteral("objectName"),
             QStringLiteral("kind"),
-            QStringLiteral("sceneKind"),
+            QStringLiteral("renderKind"),
             QStringLiteral("type"),
             QStringLiteral("children"),
         } },
@@ -1231,11 +1231,11 @@ Window {
                                                   QStringLiteral("quick3d.view.withScene"));
     QVERIFY(!viewNode.isEmpty());
     QCOMPARE(viewNode.value(QStringLiteral("type")).toString(), QStringLiteral("View3D"));
-    QCOMPARE(viewNode.value(QStringLiteral("sceneKind")).toString(), QStringLiteral("QtQuick3D"));
+    QCOMPARE(viewNode.value(QStringLiteral("renderKind")).toString(), QStringLiteral("QtQuick3D"));
     const QJsonObject cubeNode = nodeByObjectName(sceneTree, QStringLiteral("quick3d.nudge.cube"));
     QVERIFY(!cubeNode.isEmpty());
     QCOMPARE(cubeNode.value(QStringLiteral("kind")).toString(), QStringLiteral("QQuick3DObject"));
-    QCOMPARE(cubeNode.value(QStringLiteral("sceneKind")).toString(), QStringLiteral("QtQuick3D"));
+    QVERIFY(!cubeNode.contains(QStringLiteral("renderKind")));
 
     QQmlComponent emptyComponent(&engine);
     emptyComponent.setData(R"(
@@ -1264,7 +1264,7 @@ Window {
         { QStringLiteral("fields"), QJsonArray{
             QStringLiteral("objectName"),
             QStringLiteral("kind"),
-            QStringLiteral("sceneKind"),
+            QStringLiteral("renderKind"),
             QStringLiteral("type"),
             QStringLiteral("children"),
         } },
@@ -1273,7 +1273,7 @@ Window {
                                                    QStringLiteral("quick3d.view.empty"));
     QVERIFY(!emptyNode.isEmpty());
     QCOMPARE(emptyNode.value(QStringLiteral("type")).toString(), QStringLiteral("View3D"));
-    QCOMPARE(emptyNode.value(QStringLiteral("sceneKind")).toString(), QStringLiteral("QtQuick3D"));
+    QCOMPARE(emptyNode.value(QStringLiteral("renderKind")).toString(), QStringLiteral("QtQuick3D"));
 }
 
 void tst_QQmlAgentInput::quick3DDiagnosticsReportSceneSetupIssues()

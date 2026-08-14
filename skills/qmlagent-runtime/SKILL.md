@@ -132,6 +132,8 @@ for `Model`, camera, light, material, texture, and related nodes. These nodes
 are structural/source evidence, not `QQuickItem` click targets. For `Model`
 visibility/debugging, request `fields:["render3D"]` to get world bounds,
 projected screen bounds, camera distance, and approximate frustum evidence.
+The `View3D` boundary reports `renderKind:"QtQuick3D"`; its traversed scene
+objects report `kind:"QQuick3DObject"` without a render kind.
 Use `qmlagent_diagnostics_analyze_tree` or `qmlagent_diagnostics_analyze_node`
 with `checks:["quick3D"]` to focus on View3D camera/light setup, Model
 material/scale, texture source, and render3D-backed frustum evidence.

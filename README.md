@@ -259,6 +259,8 @@ When CMake finds `Qt6::Quick3D`, QmlAgent reports
 scene objects in `UI.getTree` and `UI.query`. Models, cameras, lights,
 materials, textures, and Repeater3D delegates use the normal selector and
 source-mapping machinery; they are structural evidence, not 2D click targets.
+The `View3D` boundary reports `renderKind:"QtQuick3D"`; scene descendants use
+`kind:"QQuick3DObject"`.
 
 Request `fields:["render3D"]` for model bounds and projection evidence, run
 diagnostics with `checks:["quick3D"]` for focused scene issues, and use

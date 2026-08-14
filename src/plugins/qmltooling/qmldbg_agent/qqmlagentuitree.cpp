@@ -1419,9 +1419,9 @@ static QJsonObject nodeForObjectInternal(QObject *object, int windowId, int dept
                 item ? QStringLiteral("QQuickItem")
                      : (quick3DObject ? QStringLiteral("QQuick3DObject")
                                       : QStringLiteral("QObject")));
-    if (quick3DObject || quick3DViewport)
-        insertField(&node, options, QStringLiteral("sceneKind"), QStringLiteral("QtQuick3D"));
-    if (object->inherits("QCanvasPainterItem"))
+    if (quick3DViewport)
+        insertField(&node, options, QStringLiteral("renderKind"), QStringLiteral("QtQuick3D"));
+    else if (object->inherits("QCanvasPainterItem"))
         insertField(&node, options, QStringLiteral("renderKind"),
                     QStringLiteral("QtCanvasPainter"));
     insertField(&node, options, QStringLiteral("type"), typeName);

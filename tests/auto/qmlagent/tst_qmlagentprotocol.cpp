@@ -263,6 +263,12 @@ void tst_QQmlAgentProtocol::mcpToolSchemasExposeAgentFirstContracts()
                     .contains(QStringLiteral("render3D")),
              qPrintable(QJsonDocument(getTree).toJson(QJsonDocument::Compact)));
     QVERIFY2(getTree.value(QStringLiteral("description")).toString()
+                    .contains(QStringLiteral("renderKind=\"QtQuick3D\"")),
+             qPrintable(QJsonDocument(getTree).toJson(QJsonDocument::Compact)));
+    QVERIFY2(getTree.value(QStringLiteral("description")).toString()
+                    .contains(QStringLiteral("kind=\"QQuick3DObject\"")),
+             qPrintable(QJsonDocument(getTree).toJson(QJsonDocument::Compact)));
+    QVERIFY2(getTree.value(QStringLiteral("description")).toString()
                     .contains(QStringLiteral("renderKind=\"QtCanvasPainter\"")),
              qPrintable(QJsonDocument(getTree).toJson(QJsonDocument::Compact)));
     QVERIFY2(getTree.value(QStringLiteral("description")).toString()
