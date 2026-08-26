@@ -856,14 +856,61 @@ static int quickWindowId(const QQuickWindow *targetWindow)
     return -1;
 }
 
-static QJsonObject deliveryWindowEvidence(const QQuickItem *item)
+static QQuickWindow *quickWindowForId(int requestedWindowId)
 {
-    QQuickWindow *window = item ? item->window() : nullptr;
+    if (requestedWindowId <= 0)
+        return nullptr;
+
+    int windowId = 0;
+    const QWindowList windows = QGuiApplication::allWindows();
+    for (QWindow *window : windows) {
+        QQuickWindow *quickWindow = qobject_cast<QQuickWindow *>(window);
+        if (!quickWindow)
+            continue;
+        ++windowId;
+        if (windowId == requestedWindowId)
+            return quickWindow;
+    }
+    return nullptr;
+}
+
+static QQuickWindow *requestedQuickWindow(const QJsonObject &params, int *requestedWindowId,
+                                          QJsonObject *failure)
+{
+    *requestedWindowId = -1;
+    *failure = {};
+    if (!params.contains(QStringLiteral("windowId")))
+        return nullptr;
+
+    *requestedWindowId = params.value(QStringLiteral("windowId")).toInt(-1);
+    if (*requestedWindowId <= 0) {
+        *failure = keyFailure(QStringLiteral("invalid_window_id"),
+                              { QStringLiteral("windowId must be a positive integer") });
+        return nullptr;
+    }
+
+    QQuickWindow *window = quickWindowForId(*requestedWindowId);
+    if (!window) {
+        *failure = keyFailure(QStringLiteral("window_not_found"),
+                              { QStringLiteral("no QQuickWindow has windowId=%1")
+                                        .arg(*requestedWindowId) });
+    }
+    return window;
+}
+
+static QJsonObject keyboardWindowMismatch(int requestedWindowId, QQuickWindow *targetWindow)
+{
+    return keyFailure(QStringLiteral("window_mismatch"),
+                      { QStringLiteral("requested windowId=%1").arg(requestedWindowId),
+                        QStringLiteral("target belongs to windowId=%1")
+                                .arg(quickWindowId(targetWindow)) });
+}
+
+static QJsonObject deliveryWindowEvidence(const QQuickWindow *window, const QString &source)
+{
     QJsonObject evidence{
         { QStringLiteral("available"), window != nullptr },
-        { QStringLiteral("source"), QStringLiteral("target-item-window") },
-        { QStringLiteral("limitation"),
-          QStringLiteral("QmlAgent delivers to the target item's current QQuickWindow; popup and multi-window correctness must be verified with post-dispatch UI evidence.") },
+        { QStringLiteral("source"), source },
     };
     if (!window)
         return evidence;
@@ -871,6 +918,15 @@ static QJsonObject deliveryWindowEvidence(const QQuickItem *item)
     evidence.insert(QStringLiteral("windowId"), quickWindowId(window));
     evidence.insert(QStringLiteral("title"), window->title());
     evidence.insert(QStringLiteral("size"), QJsonArray{ window->width(), window->height() });
+    return evidence;
+}
+
+static QJsonObject deliveryWindowEvidence(const QQuickItem *item)
+{
+    QQuickWindow *window = item ? item->window() : nullptr;
+    QJsonObject evidence = deliveryWindowEvidence(window, QStringLiteral("target-item-window"));
+    evidence.insert(QStringLiteral("limitation"),
+                    QStringLiteral("QmlAgent delivers to the target item's current QQuickWindow; popup and multi-window correctness must be verified with post-dispatch UI evidence."));
     return evidence;
 }
 
@@ -1574,6 +1630,13 @@ QJsonObject QQmlAgentInput::typeText(const QJsonObject &params)
         return keyFailure(QStringLiteral("invalid_text"),
                           { QStringLiteral("text must be a non-empty string") });
 
+    int requestedWindowId = -1;
+    QJsonObject windowFailure;
+    QQuickWindow *requestedWindow = requestedQuickWindow(params, &requestedWindowId,
+                                                         &windowFailure);
+    if (!windowFailure.isEmpty())
+        return windowFailure;
+
     const bool hasNodeId = params.contains(QStringLiteral("nodeId"))
             && !params.value(QStringLiteral("nodeId")).isUndefined();
     const bool hasSelector = !params.value(QStringLiteral("selector")).toString().isEmpty();
@@ -1587,6 +1650,11 @@ QJsonObject QQmlAgentInput::typeText(const QJsonObject &params)
         if (!ref.issues.isEmpty())
             return failureWithDiagnostics(ref.failureReason, ref.issues);
         targetNodeId = ref.nodeId;
+
+        QQuickItem *resolvedItem = qobject_cast<QQuickItem *>(ref.object);
+        QQuickWindow *resolvedWindow = resolvedItem ? resolvedItem->window() : nullptr;
+        if (requestedWindow && resolvedWindow && requestedWindow != resolvedWindow)
+            return keyboardWindowMismatch(requestedWindowId, resolvedWindow);
 
         QJsonObject focusParams{
             { QStringLiteral("settle"), params.value(QStringLiteral("focusSettle")).toObject() },
@@ -1650,7 +1718,8 @@ QJsonObject QQmlAgentInput::typeText(const QJsonObject &params)
         }
     }
 
-    QQuickWindow *window = inputWindow ? inputWindow : targetQuickWindow();
+    QQuickWindow *window = inputWindow ? inputWindow
+                                       : requestedWindow ? requestedWindow : targetQuickWindow();
     if (!window) {
         return keyFailure(QStringLiteral("unknown_window"),
                           { QStringLiteral("no focused or unique nonzero QQuickWindow with contentItem") });
@@ -1665,10 +1734,12 @@ QJsonObject QQmlAgentInput::typeText(const QJsonObject &params)
         if (!guardedWindow)
             return;
         QQuickItem *activeFocusItem = guardedWindow->activeFocusItem();
-        QObject *keyTarget = itemContainsOrIs(targetItem, activeFocusItem)
-                ? static_cast<QObject *>(activeFocusItem)
-                : targetKeyItem ? static_cast<QObject *>(targetKeyItem)
-                                : static_cast<QObject *>(guardedWindow.data());
+        QObject *keyTarget = targetKeyItem
+                ? (itemContainsOrIs(targetItem, activeFocusItem)
+                           ? static_cast<QObject *>(activeFocusItem)
+                           : static_cast<QObject *>(targetKeyItem))
+                : activeFocusItem ? static_cast<QObject *>(activeFocusItem)
+                                  : static_cast<QObject *>(guardedWindow.data());
         if (keyTarget == static_cast<QObject *>(guardedWindow.data()))
             targetKind = QStringLiteral("window");
         else if (isEditableTextObject(keyTarget))
@@ -1752,8 +1823,13 @@ QJsonObject QQmlAgentInput::typeText(const QJsonObject &params)
               QStringLiteral("No editable target received the key events; they were delivered to the window. Target a text item or verify the text state explicitly.") },
         } });
     }
-    if (targetItem)
-        result.insert(QStringLiteral("deliveryWindow"), deliveryWindowEvidence(targetItem));
+    result.insert(QStringLiteral("deliveryWindow"),
+                  targetItem
+                          ? deliveryWindowEvidence(targetItem)
+                          : deliveryWindowEvidence(
+                                    window, requestedWindow
+                                            ? QStringLiteral("requested-window-id")
+                                            : QStringLiteral("focused-or-unique-window")));
     if (targetNodeId > 0)
         result.insert(QStringLiteral("postDispatch"), postDispatchTargetState(targetNodeId));
     if (replaceExisting) {
@@ -1856,6 +1932,13 @@ QJsonObject QQmlAgentInput::dispatchKeyEvent(const QJsonObject &params)
                           { QStringLiteral("type must be keyClick, keyPress, or keyRelease") });
     }
 
+    int requestedWindowId = -1;
+    QJsonObject windowFailure;
+    QQuickWindow *requestedWindow = requestedQuickWindow(params, &requestedWindowId,
+                                                         &windowFailure);
+    if (!windowFailure.isEmpty())
+        return windowFailure;
+
     QJsonObject focusResult;
     QQuickWindow *window = nullptr;
     QQuickItem *targetKeyItem = nullptr;
@@ -1863,6 +1946,11 @@ QJsonObject QQmlAgentInput::dispatchKeyEvent(const QJsonObject &params)
         const QQmlAgentUiTree::NodeRef ref = QQmlAgentUiTree::resolveNodeRef(params);
         if (!ref.issues.isEmpty())
             return failureWithDiagnostics(ref.failureReason, ref.issues);
+
+        QQuickItem *item = qobject_cast<QQuickItem *>(ref.object);
+        QQuickWindow *itemWindow = item ? item->window() : nullptr;
+        if (requestedWindow && itemWindow && requestedWindow != itemWindow)
+            return keyboardWindowMismatch(requestedWindowId, itemWindow);
 
         focusResult = focusNode(params);
         if (!focusResult.value(QStringLiteral("focused")).toBool()) {
@@ -1872,7 +1960,6 @@ QJsonObject QQmlAgentInput::dispatchKeyEvent(const QJsonObject &params)
             return result;
         }
 
-        QQuickItem *item = qobject_cast<QQuickItem *>(ref.object);
         if (item) {
             window = item->window();
             targetKeyItem = keyboardFocusItemFor(item);
@@ -1880,7 +1967,7 @@ QJsonObject QQmlAgentInput::dispatchKeyEvent(const QJsonObject &params)
     }
 
     if (!window)
-        window = targetQuickWindow();
+        window = requestedWindow ? requestedWindow : targetQuickWindow();
     if (!window) {
         return keyFailure(QStringLiteral("unknown_window"),
                           { QStringLiteral("no focused or unique nonzero QQuickWindow with contentItem") });
@@ -1891,10 +1978,12 @@ QJsonObject QQmlAgentInput::dispatchKeyEvent(const QJsonObject &params)
         if (!guardedWindow)
             return;
         QQuickItem *activeFocusItem = guardedWindow->activeFocusItem();
-        QObject *keyTarget = itemContainsOrIs(targetKeyItem, activeFocusItem)
-                ? static_cast<QObject *>(activeFocusItem)
-                : targetKeyItem ? static_cast<QObject *>(targetKeyItem)
-                                : static_cast<QObject *>(guardedWindow.data());
+        QObject *keyTarget = targetKeyItem
+                ? (itemContainsOrIs(targetKeyItem, activeFocusItem)
+                           ? static_cast<QObject *>(activeFocusItem)
+                           : static_cast<QObject *>(targetKeyItem))
+                : activeFocusItem ? static_cast<QObject *>(activeFocusItem)
+                                  : static_cast<QObject *>(guardedWindow.data());
         QPointer<QObject> guardedKeyTarget(keyTarget);
         if (type == QLatin1String("keyClick") || type == QLatin1String("keyPress"))
             QQmlAgentInputDriver::key(guardedKeyTarget.data(), QEvent::KeyPress, key, modifiers, text);
@@ -1911,6 +2000,12 @@ QJsonObject QQmlAgentInput::dispatchKeyEvent(const QJsonObject &params)
         { QStringLiteral("type"), type },
         { QStringLiteral("mode"), QQmlAgentInputDriver::mode() },
         { QStringLiteral("settle"), settle },
+        { QStringLiteral("deliveryWindow"),
+          deliveryWindowEvidence(
+                  window, targetKeyItem
+                          ? QStringLiteral("target-item-window")
+                          : requestedWindow ? QStringLiteral("requested-window-id")
+                                            : QStringLiteral("focused-or-unique-window")) },
     });
     if (!focusResult.isEmpty())
         result.insert(QStringLiteral("focus"), focusResult);

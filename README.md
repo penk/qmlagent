@@ -237,6 +237,13 @@ qmlagent_workflow_long_press_and_wait
 qmlagent_workflow_key
 ```
 
+In a multi-window application, `qmlagent_input_key` and
+`qmlagent_input_type_text` accept the 1-based `windowId` reported by
+`qmlagent_ui_get_tree`. Use it without a node target to deliver to that
+window's current focus. If a selector/nodeId and `windowId` are both supplied,
+QmlAgent rejects a cross-window mismatch instead of silently routing input to
+the wrong window.
+
 Workflow expectations support equality, numeric comparisons, and bounded
 string operators:
 

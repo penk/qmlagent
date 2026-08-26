@@ -32,10 +32,18 @@ Window {
         title: "QmlAgent secondary smoke"
 
         Rectangle {
+            property int keyPressCount: 0
+
             objectName: root.secondaryWindowClicked ? "smoke.secondaryWindowClicked"
                                                     : "smoke.secondaryWindowContent"
             anchors.fill: parent
             color: root.secondaryWindowClicked ? "#1a7f37" : "#0969da"
+            focus: true
+
+            Keys.onPressed: function(event) {
+                ++keyPressCount
+                event.accepted = true
+            }
 
             MouseArea {
                 objectName: "smoke.secondaryWindowClickArea"
@@ -47,10 +55,18 @@ Window {
 
     Rectangle {
         id: content
+        property int keyPressCount: 0
+
         objectName: root.clicked ? "smoke.clicked" : "smoke.content"
         width: 100
         height: 40
         color: root.clicked ? "#2f7d32" : "#1f6feb"
+        focus: true
+
+        Keys.onPressed: function(event) {
+            ++keyPressCount
+            event.accepted = true
+        }
 
         MouseArea {
             objectName: "smoke.clickArea"

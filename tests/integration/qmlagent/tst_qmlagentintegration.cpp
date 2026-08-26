@@ -1341,6 +1341,84 @@ void QmlAgentIntegrationTest::inputTargetsMultipleWindows()
                  { QStringLiteral("secondary"), secondaryNode },
              }).toJson(QJsonDocument::Compact))));
 
+    const int primaryWindowId = primaryNode.value(QStringLiteral("windowId")).toInt(-1);
+    const int secondaryWindowId = secondaryNode.value(QStringLiteral("windowId")).toInt(-1);
+    const auto secondaryKey = invoke(&client, QStringLiteral("Input.dispatchKeyEvent"), {
+        { QStringLiteral("windowId"), secondaryWindowId },
+        { QStringLiteral("keyCode"), int(Qt::Key_K) },
+        { QStringLiteral("text"), QStringLiteral("k") },
+    }, 20, &errorMessage);
+    QVERIFY2(secondaryKey.has_value(), qPrintable(errorMessage));
+    const QJsonObject secondaryKeyResult = secondaryKey->value(QStringLiteral("result")).toObject();
+    QCOMPARE(secondaryKeyResult.value(QStringLiteral("delivered")).toBool(false), true);
+    QCOMPARE(secondaryKeyResult.value(QStringLiteral("deliveryWindow")).toObject()
+                     .value(QStringLiteral("windowId")).toInt(-1),
+             secondaryWindowId);
+    QCOMPARE(secondaryKeyResult.value(QStringLiteral("deliveryWindow")).toObject()
+                     .value(QStringLiteral("source")).toString(),
+             QStringLiteral("requested-window-id"));
+
+    const auto secondaryText = invoke(&client, QStringLiteral("Input.typeText"), {
+        { QStringLiteral("windowId"), secondaryWindowId },
+        { QStringLiteral("text"), QStringLiteral("t") },
+    }, 25, &errorMessage);
+    QVERIFY2(secondaryText.has_value(), qPrintable(errorMessage));
+    const QJsonObject secondaryTextResult = secondaryText->value(QStringLiteral("result")).toObject();
+    QCOMPARE(secondaryTextResult.value(QStringLiteral("delivered")).toBool(false), true);
+    QCOMPARE(secondaryTextResult.value(QStringLiteral("unitsSent")).toInt(-1), 1);
+    QCOMPARE(secondaryTextResult.value(QStringLiteral("deliveryWindow")).toObject()
+                     .value(QStringLiteral("windowId")).toInt(-1),
+             secondaryWindowId);
+
+    const auto secondaryKeyVerify = invoke(&client, QStringLiteral("UI.query"), {
+        { QStringLiteral("selector"),
+          QStringLiteral("objectName=\"smoke.secondaryWindowContent\"") },
+        { QStringLiteral("properties"), QJsonArray{ QStringLiteral("keyPressCount") } },
+    }, 21, &errorMessage);
+    QVERIFY2(secondaryKeyVerify.has_value(), qPrintable(errorMessage));
+    QCOMPARE(secondaryKeyVerify->value(QStringLiteral("result")).toObject()
+                     .value(QStringLiteral("matches")).toArray().at(0).toObject()
+                     .value(QStringLiteral("properties")).toObject()
+                     .value(QStringLiteral("keyPressCount")).toInt(-1),
+             2);
+
+    const auto primaryKeyVerify = invoke(&client, QStringLiteral("UI.query"), {
+        { QStringLiteral("selector"), QStringLiteral("objectName=\"smoke.content\"") },
+        { QStringLiteral("properties"), QJsonArray{ QStringLiteral("keyPressCount") } },
+    }, 22, &errorMessage);
+    QVERIFY2(primaryKeyVerify.has_value(), qPrintable(errorMessage));
+    QCOMPARE(primaryKeyVerify->value(QStringLiteral("result")).toObject()
+                     .value(QStringLiteral("matches")).toArray().at(0).toObject()
+                     .value(QStringLiteral("properties")).toObject()
+                     .value(QStringLiteral("keyPressCount")).toInt(-1),
+             0);
+
+    const auto mismatchedKey = invoke(&client, QStringLiteral("Input.dispatchKeyEvent"), {
+        { QStringLiteral("selector"),
+          QStringLiteral("objectName=\"smoke.secondaryWindowClickArea\"") },
+        { QStringLiteral("windowId"), primaryWindowId },
+        { QStringLiteral("keyCode"), int(Qt::Key_K) },
+    }, 23, &errorMessage);
+    QVERIFY2(mismatchedKey.has_value(), qPrintable(errorMessage));
+    QCOMPARE(mismatchedKey->value(QStringLiteral("result")).toObject()
+                     .value(QStringLiteral("delivered")).toBool(true),
+             false);
+    QCOMPARE(mismatchedKey->value(QStringLiteral("result")).toObject()
+                     .value(QStringLiteral("reason")).toString(),
+             QStringLiteral("window_mismatch"));
+
+    const auto missingWindowKey = invoke(&client, QStringLiteral("Input.dispatchKeyEvent"), {
+        { QStringLiteral("windowId"), 9999 },
+        { QStringLiteral("keyCode"), int(Qt::Key_K) },
+    }, 24, &errorMessage);
+    QVERIFY2(missingWindowKey.has_value(), qPrintable(errorMessage));
+    QCOMPARE(missingWindowKey->value(QStringLiteral("result")).toObject()
+                     .value(QStringLiteral("delivered")).toBool(true),
+             false);
+    QCOMPARE(missingWindowKey->value(QStringLiteral("result")).toObject()
+                     .value(QStringLiteral("reason")).toString(),
+             QStringLiteral("window_not_found"));
+
     const auto primaryClick = invoke(&client, QStringLiteral("Input.clickNode"), {
         { QStringLiteral("selector"), QStringLiteral("objectName=\"smoke.clickArea\"") },
     }, 3, &errorMessage);
@@ -4610,11 +4688,20 @@ void QmlAgentIntegrationTest::referenceClientMcpPersistentMode()
         { QStringLiteral("expectSelector"), QStringLiteral("objectName=\"smoke.textInput\"") },
         { QStringLiteral("expect"), QStringLiteral("text contains \"mn\"") },
     }));
+    QByteArray output = waitForOutput(&client, QByteArrayLiteral("\"id\":26"));
+    writeRequest(mcpToolCall(27, QStringLiteral("qmlagent_input_key"), {
+        { QStringLiteral("windowId"), 9999 },
+        { QStringLiteral("key"), QStringLiteral("k") },
+    }));
+    output += waitForOutput(&client, QByteArrayLiteral("\"id\":27"));
+    writeRequest(mcpToolCall(28, QStringLiteral("qmlagent_input_type_text"), {
+        { QStringLiteral("windowId"), 9999 },
+        { QStringLiteral("text"), QStringLiteral("x") },
+    }));
+    output += waitForOutput(&client, QByteArrayLiteral("\"id\":28"));
     writeRequest(mcpToolCall(9, QStringLiteral("qmlagent_log_enable"), {
         { QStringLiteral("replayBuffered"), true },
     }));
-
-    QByteArray output = waitForOutput(&client, QByteArrayLiteral("\"id\":26"));
     output += waitForOutput(&client, QByteArrayLiteral("\"method\":\"Log.entryAdded\""));
     writeRequest(mcpToolCall(22, QStringLiteral("qmlagent_target_status"), {}));
     output += waitForOutput(&client, QByteArrayLiteral("\"id\":22"));
@@ -4883,6 +4970,14 @@ void QmlAgentIntegrationTest::referenceClientMcpPersistentMode()
                      .value(QStringLiteral("structuredContent")).toObject()
                      .value(QStringLiteral("returnValue")).toInt(-1),
              3);
+    for (const int responseId : { 27, 28 }) {
+        const QJsonObject keyboardContent = responses.value(responseId)
+                .value(QStringLiteral("result")).toObject()
+                .value(QStringLiteral("structuredContent")).toObject();
+        QCOMPARE(keyboardContent.value(QStringLiteral("delivered")).toBool(true), false);
+        QCOMPARE(keyboardContent.value(QStringLiteral("reason")).toString(),
+                 QStringLiteral("window_not_found"));
+    }
 
     const QJsonObject selectedTreeContent = responses.value(15).value(QStringLiteral("result")).toObject()
             .value(QStringLiteral("structuredContent")).toObject();

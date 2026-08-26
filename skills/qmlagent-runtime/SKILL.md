@@ -229,6 +229,10 @@ supported.
   expression, source location, and dependency limitations.
 - Use `UI.waitFor` or workflow tools for transitions, popups, loaders,
   animations, and async post-action state. Do not use sleeps.
+- In multi-window apps, use the `windowId` reported by `UI.getTree` with
+  `qmlagent_input_key` or `qmlagent_input_type_text` when input should go to a
+  window's current focus rather than a specific node. Supplying both a node
+  target and `windowId` validates that they belong to the same window.
 - Use `qmlagent_ui_query_many` or shell `qmlagentctl query-many` for multiple
   selectors/properties after one action instead of serial query calls.
 - If click/read evidence reports `center_outside_viewport`, use

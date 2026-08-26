@@ -2137,7 +2137,8 @@ private:
                                         QStringLiteral("keyCode"),
                                         QStringLiteral("text"),
                                         QStringLiteral("type"),
-                                        QStringLiteral("modifiers") }) {
+                                        QStringLiteral("modifiers"),
+                                        QStringLiteral("windowId") }) {
                 if (arguments.contains(key))
                     targetParams->insert(key, arguments.value(key));
             }
@@ -2153,6 +2154,9 @@ private:
             *targetParams = { { QStringLiteral("text"), arguments.value(QStringLiteral("text")) } };
             if (arguments.value(QStringLiteral("replaceExisting")).toBool(false))
                 targetParams->insert(QStringLiteral("replaceExisting"), true);
+            if (arguments.contains(QStringLiteral("windowId")))
+                targetParams->insert(QStringLiteral("windowId"),
+                                     arguments.value(QStringLiteral("windowId")).toInt());
             const bool hasSelector = arguments.contains(QStringLiteral("selector"))
                     && !arguments.value(QStringLiteral("selector")).toString().isEmpty();
             const bool hasNodeId = arguments.contains(QStringLiteral("nodeId"))

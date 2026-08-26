@@ -413,11 +413,16 @@ QJsonArray toolList()
                  { QStringLiteral("modifiers"), stringArray },
              }), { QStringLiteral("type"), QStringLiteral("points") })),
         tool(QStringLiteral("qmlagent_input_key"),
-             QStringLiteral("Dispatch a key event, optionally targeting selector/nodeId first."),
+             QStringLiteral("Dispatch a key event through Qt input. Target selector/nodeId to focus a node first, or pass windowId from UI.getTree to route to that QQuickWindow's current focus in a multi-window app. When a node and windowId are both supplied, QmlAgent rejects a cross-window mismatch instead of silently choosing one. Verify the resulting state with qmlagent_ui_query or qmlagent_ui_wait_for."),
              schema(withNodeRef({
                  { QStringLiteral("key"), QJsonObject{ { QStringLiteral("type"), QStringLiteral("string") } } },
                  { QStringLiteral("keyCode"), QJsonObject{ { QStringLiteral("type"), QStringLiteral("integer") } } },
                  { QStringLiteral("text"), QJsonObject{ { QStringLiteral("type"), QStringLiteral("string") } } },
+                 { QStringLiteral("windowId"), QJsonObject{
+                     { QStringLiteral("type"), QStringLiteral("integer") },
+                     { QStringLiteral("minimum"), 1 },
+                     { QStringLiteral("description"), QStringLiteral("1-based QQuickWindow id reported by UI.getTree; routes untargeted keys to that window's current focus.") },
+                 } },
                  { QStringLiteral("type"), QJsonObject{
                      { QStringLiteral("type"), QStringLiteral("string") },
                      { QStringLiteral("enum"), QJsonArray{
@@ -429,9 +434,14 @@ QJsonArray toolList()
                  { QStringLiteral("modifiers"), stringArray },
              }))),
         tool(QStringLiteral("qmlagent_input_type_text"),
-             QStringLiteral("Type text through synthetic key input, optionally targeting selector/nodeId first. Pass replaceExisting=true to clear the field's current content first in the same call; without it, text lands at the target's normal cursor/selection state. If click-to-focus fails, call qmlagent_input_focus on the same selector/nodeId, then retry; focus_failed results include nextHints. Verify final text with qmlagent_ui_query or qmlagent_ui_wait_for."),
+             QStringLiteral("Type text through synthetic key input. Target selector/nodeId to focus a text item first, or pass windowId from UI.getTree to route to that QQuickWindow's current focus in a multi-window app. When a node and windowId are both supplied, QmlAgent rejects a cross-window mismatch. Pass replaceExisting=true to clear the field's current content first in the same call; without it, text lands at the target's normal cursor/selection state. If click-to-focus fails, call qmlagent_input_focus on the same selector/nodeId, then retry; focus_failed results include nextHints. Verify final text with qmlagent_ui_query or qmlagent_ui_wait_for."),
              schema(withNodeRef({
                         { QStringLiteral("text"), QJsonObject{ { QStringLiteral("type"), QStringLiteral("string") } } },
+                        { QStringLiteral("windowId"), QJsonObject{
+                            { QStringLiteral("type"), QStringLiteral("integer") },
+                            { QStringLiteral("minimum"), 1 },
+                            { QStringLiteral("description"), QStringLiteral("1-based QQuickWindow id reported by UI.getTree; routes untargeted text to that window's current focus.") },
+                        } },
                         { QStringLiteral("replaceExisting"), QJsonObject{
                             { QStringLiteral("type"), QStringLiteral("boolean") },
                             { QStringLiteral("description"), QStringLiteral("Clear existing content before typing (one call instead of clear_text + type_text).") },
