@@ -47,8 +47,14 @@ the reply back to the requesting client's response file.
 **qmlagentctl and qmlagent-mcp** are the same binary
 (`tools/qmlagent/main.cpp`), dispatched on `argv[0]`. Both discover live
 launcher sessions by scanning the registry directories, validating each
-session file (launcher PID still alive, control mailbox present) and probing
-`Session.status`. `qmlagentctl` maps shell subcommands (`query`, `click`,
+session file and probing `Session.status` through an existing control mailbox.
+Registry PIDs are descriptive, not process identities in the client's PID
+namespace. Discovery never removes registry files or recreates missing
+mailboxes; an unavailable endpoint is reported as `controlReachable:false`
+with a `controlError` and is excluded from routing. Both clients stop targets
+through the launcher's control channel only: an unreachable channel is an
+error, never a reason to signal unverified registry PIDs.
+`qmlagentctl` maps shell subcommands (`query`, `click`,
 `wait`, `call`, ...) onto `QmlAgent.request` envelopes through the mailbox; a
 `control.lock` `QLockFile` in the mailbox serializes concurrent clients per
 session. `qmlagent-mcp` is a stdio MCP server exposing the same operations as
@@ -111,7 +117,8 @@ JSON-RPC error with narrowing hints instead of being sent.
 `tools/qmlagent/`:
 
 - `launcher_main.cpp` — `qmlagent-launcher`: target process ownership, private debug socket, file-mailbox control server, registry and exit-report files, internal preview host with reload.
-- `main.cpp` — shared client binary for `qmlagentctl` (subcommands) and `qmlagent-mcp` (stdio MCP server): session discovery, mailbox client, direct TCP/local-socket attach, target leases, workflow tools.
+- `main.cpp` — shared client binary for `qmlagentctl` (subcommands) and `qmlagent-mcp` (stdio MCP server): command/tool dispatch, direct TCP/local-socket attach, target leases, workflow tools.
+- `qmlagentlauncher.cpp` — launcher registry discovery, existing-mailbox transport, and reachable-session selection shared by the CLI and MCP client.
 - `qmlagentclioutput.cpp` — compact human-readable summaries for qmlagentctl output.
 - `qmlagentmcpoutput.cpp` — bounded summaries of query/workflow results for MCP tool responses.
 - `qmlagentmcpprotocol.cpp` — MCP JSON-RPC framing and the tool catalog with input schemas.
@@ -126,8 +133,10 @@ registry under `<GenericDataLocation>/QmlAgent/`:
   target PID, session type, launch command, control mailbox path). Written to
   the temp and data roots and, when the workspace is writable, to
   `./.qmlagent/launcher-sessions/` so clients can prefer sessions from the
-  current workspace. Removed on exit; clients also prune entries whose
-  launcher PID is gone.
+  current workspace. Removed by the owning launcher on exit; clients retain
+  entries even when the PID or mailbox is not visible from their sandbox.
+  Records left by an abruptly terminated launcher remain listed as
+  unreachable and do not take part in automatic routing.
 - `qmlagent-<launcherPid>/` — per-launcher runtime dir containing the debug
   socket (`d-<id>`), the control mailbox (`control-<id>/`), and the preview
   reload socket (`p-<id>`). Deleted recursively on exit.

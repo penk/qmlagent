@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #include "qmlagentclioutput.h"
+#include "qmlagentlauncher.h"
 #include "qmlagentmcpoutput.h"
 #include "qmlagentmcpprotocol.h"
 #include "qmlagentpaths.h"
@@ -14,7 +15,6 @@
 #include <QtCore/qcoreapplication.h>
 #include <QtCore/qcryptographichash.h>
 #include <QtCore/qdatetime.h>
-#include <QtCore/qdeadlinetimer.h>
 #include <QtCore/qdir.h>
 #include <QtCore/qeventloop.h>
 #include <QtCore/qfile.h>
@@ -25,15 +25,12 @@
 #include <QtCore/qjsonvalue.h>
 #include <QtCore/qlockfile.h>
 #include <QtCore/qqueue.h>
-#include <QtCore/qsavefile.h>
 #include <QtCore/qset.h>
 #include <QtCore/qsocketnotifier.h>
 #include <QtCore/qstandardpaths.h>
 #include <QtCore/qstringlist.h>
 #include <QtCore/qtextstream.h>
-#include <QtCore/qthread.h>
 #include <QtCore/qtimer.h>
-#include <QtCore/quuid.h>
 #include <QtNetwork/qabstractsocket.h>
 #include <QtNetwork/qlocalsocket.h>
 #include <QtNetwork/qtcpsocket.h>
@@ -44,7 +41,6 @@
 #include <limits>
 #include <memory>
 #include <optional>
-#include <signal.h>
 #include <unistd.h>
 
 static constexpr int LauncherControlReplySlackMs = 1000;
@@ -447,13 +443,6 @@ static QJsonObject makeRequest(int id, const QString &requestMethod, const QJson
     };
 }
 
-struct LauncherSession
-{
-    QString id;
-    QJsonObject metadata;
-    QJsonObject status;
-};
-
 static QJsonArray recentLauncherExitReports()
 {
     QJsonArray reports;
@@ -481,144 +470,6 @@ static QJsonArray recentLauncherExitReports()
         reports.append(document.object());
     }
     return reports;
-}
-
-static QStringList launcherRegistryDirs()
-{
-    QStringList dirs;
-    const QString workspaceStateDir = QDir::current().filePath(QStringLiteral(".qmlagent"));
-    if (QFileInfo::exists(workspaceStateDir))
-        dirs.append(QDir(workspaceStateDir).filePath(QStringLiteral("launcher-sessions")));
-
-    for (const QString &globalDir : globalLauncherRegistryDirs()) {
-        if (!dirs.contains(globalDir))
-            dirs.append(globalDir);
-    }
-    return dirs;
-}
-
-static bool processExists(qint64 pid)
-{
-    if (pid <= 0)
-        return false;
-    errno = 0;
-    return ::kill(pid_t(pid), 0) == 0 || errno == EPERM;
-}
-
-static bool terminatePid(qint64 pid)
-{
-    if (pid <= 0 || !processExists(pid))
-        return false;
-    return ::kill(pid_t(pid), SIGTERM) == 0;
-}
-
-static QJsonObject readLauncherMailboxResponse(const QString &responsePath, int timeoutMs,
-                                               QString *error)
-{
-    QDeadlineTimer deadline(timeoutMs);
-    while (!deadline.hasExpired()) {
-        if (QFileInfo(responsePath).isSymLink()) {
-            *error = QStringLiteral("Refusing symlinked qmlagent-launcher mailbox response: %1")
-                             .arg(responsePath);
-            return {};
-        }
-        QFile responseFile(responsePath);
-        if (responseFile.open(QIODevice::ReadOnly)) {
-            const QByteArray payload = responseFile.readAll().trimmed();
-            responseFile.close();
-            QFile::remove(responsePath);
-
-            QJsonParseError parseError;
-            const QJsonDocument document = QJsonDocument::fromJson(payload, &parseError);
-            if (parseError.error != QJsonParseError::NoError || !document.isObject()) {
-                *error = QStringLiteral("Invalid qmlagent-launcher mailbox response.");
-                return {};
-            }
-            return document.object();
-        }
-
-        QThread::msleep(10);
-    }
-
-    *error = QStringLiteral("Timed out waiting for qmlagent-launcher mailbox response.");
-    return {};
-}
-
-static QJsonObject sendLauncherMailboxControlRequest(const QString &mailboxDir, int timeoutMs,
-                                                     const QString &method,
-                                                     const QJsonObject &params, QString *error)
-{
-    if (mailboxDir.isEmpty()) {
-        *error = QStringLiteral("qmlagent-launcher session has no control mailbox.");
-        return {};
-    }
-
-    if (!ensurePrivateDirectory(mailboxDir, error))
-        return {};
-
-    QLockFile controlLock(QDir(mailboxDir).filePath(QStringLiteral("control.lock")));
-    controlLock.setStaleLockTime(5000);
-    if (!controlLock.tryLock(qMax(0, timeoutMs))) {
-        *error = QStringLiteral("Timed out acquiring qmlagent-launcher control lease for %1. "
-                                "Another agent process may be driving this launcher session.")
-                         .arg(mailboxDir);
-        return {};
-    }
-
-    const QString token = QUuid::createUuid().toString(QUuid::WithoutBraces);
-    const QString requestPath = QDir(mailboxDir).filePath(
-            QStringLiteral("request-%1.json").arg(token));
-    const QString replyDir = QDir(mailboxRepliesRoot())
-            .filePath(QString::number(qint64(QCoreApplication::applicationPid())));
-    if (!ensurePrivateDirectory(qmlAgentTempRoot(), error))
-        return {};
-    if (!ensurePrivateDirectory(mailboxRepliesRoot(), error))
-        return {};
-    if (!ensurePrivateDirectory(replyDir, error))
-        return {};
-    const QString responsePath = QDir(replyDir).filePath(
-            QStringLiteral("response-%1.json").arg(token));
-
-    if (!pathIsInsideDirectory(requestPath, mailboxDir)
-            || !pathIsInsideDirectory(responsePath, replyDir)) {
-        *error = QStringLiteral("Refusing qmlagent-launcher mailbox path outside private directory.");
-        return {};
-    }
-
-    QSaveFile requestFile(requestPath);
-    if (!requestFile.open(QIODevice::WriteOnly)) {
-        *error = QStringLiteral("Could not write qmlagent-launcher mailbox request: %1")
-                         .arg(requestPath);
-        return {};
-    }
-    QJsonObject request = makeRequest(1, method, params);
-    request.insert(QStringLiteral("replyTo"), responsePath);
-    requestFile.write(compactJson(request));
-    requestFile.write("\n");
-    if (!requestFile.commit()) {
-        *error = QStringLiteral("Could not publish qmlagent-launcher mailbox request: %1")
-                         .arg(requestPath);
-        return {};
-    }
-    QFile::setPermissions(requestPath, privateFilePermissions());
-
-    if (method == QLatin1String("Session.stop"))
-        controlLock.unlock();
-
-    return readLauncherMailboxResponse(responsePath, timeoutMs, error);
-}
-
-static QJsonObject sendLauncherControlRequest(const QJsonObject &metadata, int timeoutMs,
-                                              const QString &method, const QJsonObject &params,
-                                              QString *error)
-{
-    const QString mailboxDir = metadata.value(QStringLiteral("controlMailbox")).toString();
-    if (!mailboxDir.isEmpty())
-        return sendLauncherMailboxControlRequest(mailboxDir, timeoutMs, method, params, error);
-
-    *error = QStringLiteral("qmlagent-launcher session has no supported control mailbox. "
-                            "Restart the session with the current qmlagent-launcher.");
-    return {};
 }
 
 static int addLauncherReplySlack(int semanticTimeoutMs)
@@ -667,227 +518,6 @@ static int launcherControlTimeoutMs(const QString &method, const QJsonObject &pa
     if (semanticTimeoutMs < 0)
         return fallbackTimeoutMs;
     return qMax(fallbackTimeoutMs, addLauncherReplySlack(semanticTimeoutMs));
-}
-
-static bool hasLauncherControlEndpoint(const QJsonObject &metadata)
-{
-    return !metadata.value(QStringLiteral("controlMailbox")).toString().isEmpty();
-}
-
-static QJsonObject launcherControlEndpointSummary(const QJsonObject &metadata)
-{
-    const QString mailboxDir = metadata.value(QStringLiteral("controlMailbox")).toString();
-    if (!mailboxDir.isEmpty()) {
-        return {
-            { QStringLiteral("kind"), QStringLiteral("fileMailbox") },
-            { QStringLiteral("path"), mailboxDir },
-        };
-    }
-
-    return {
-        { QStringLiteral("kind"), QStringLiteral("none") },
-    };
-}
-
-static QJsonObject launcherControlEndpointSummary(const LauncherSession &session)
-{
-    QJsonObject endpoint = launcherControlEndpointSummary(session.metadata);
-    const QJsonObject statusEndpoint = session.status.value(QStringLiteral("controlEndpoint")).toObject();
-    if (!statusEndpoint.isEmpty())
-        endpoint = statusEndpoint;
-    return endpoint;
-}
-
-static QList<LauncherSession> discoverLauncherSessions(int timeoutMs)
-{
-    QList<LauncherSession> sessions;
-    QSet<QString> seenSessionIds;
-    for (const QString &registryDir : launcherRegistryDirs()) {
-        const QDir dir(registryDir);
-        const QStringList entries = dir.entryList({ QStringLiteral("*.json") }, QDir::Files);
-        for (const QString &entry : entries) {
-            const QString path = dir.filePath(entry);
-            QFile file(path);
-            if (!file.open(QIODevice::ReadOnly))
-                continue;
-            QJsonParseError parseError;
-            const QJsonDocument document = QJsonDocument::fromJson(file.readAll(), &parseError);
-            if (parseError.error != QJsonParseError::NoError || !document.isObject()) {
-                QFile::remove(path);
-                continue;
-            }
-
-            const QJsonObject metadata = document.object();
-            const QString id = metadata.value(QStringLiteral("launcherSession")).toString();
-            if (id.isEmpty() || !hasLauncherControlEndpoint(metadata)) {
-                QFile::remove(path);
-                continue;
-            }
-            if (seenSessionIds.contains(id))
-                continue;
-            const qint64 launcherPid = metadata.value(QStringLiteral("launcherPid")).toInteger(-1);
-            if (launcherPid > 0 && !processExists(launcherPid)) {
-                QFile::remove(path);
-                continue;
-            }
-
-            QString statusError;
-            const QJsonObject statusResponse = sendLauncherControlRequest(
-                    metadata, qMin(timeoutMs, 1000), QStringLiteral("Session.status"), {},
-                    &statusError);
-            QJsonObject status;
-            if (statusError.isEmpty()) {
-                status = statusResponse.value(QStringLiteral("result")).toObject();
-                status.insert(QStringLiteral("controlReachable"), true);
-            } else {
-                status = {
-                    { QStringLiteral("controlReachable"), false },
-                    { QStringLiteral("controlError"), statusError },
-                    { QStringLiteral("sessionType"), metadata.value(QStringLiteral("sessionType")) },
-                    { QStringLiteral("launchCommand"), metadata.value(QStringLiteral("launchCommand")) },
-                    { QStringLiteral("reloadPreviewSupported"), metadata.value(QStringLiteral("reloadPreviewSupported")) },
-                };
-            }
-            seenSessionIds.insert(id);
-            sessions.append({ id, metadata, status });
-        }
-    }
-    return sessions;
-}
-
-static QJsonArray launcherSessionSummaries(const QList<LauncherSession> &sessions)
-{
-    QJsonArray summaries;
-    for (const LauncherSession &session : sessions) {
-        summaries.append(QJsonObject{
-            { QStringLiteral("launcherSession"), session.id },
-            { QStringLiteral("controlReachable"), session.status.value(QStringLiteral("controlReachable")).toBool(true) },
-            { QStringLiteral("controlError"), session.status.value(QStringLiteral("controlError")) },
-            { QStringLiteral("controlEndpoint"), launcherControlEndpointSummary(session) },
-            { QStringLiteral("sessionType"), session.status.value(QStringLiteral("sessionType")) },
-            { QStringLiteral("launchCommand"), session.status.value(QStringLiteral("launchCommand")) },
-            { QStringLiteral("reloadPreviewSupported"), session.status.value(QStringLiteral("reloadPreviewSupported")) },
-            { QStringLiteral("previewRoot"), session.status.value(QStringLiteral("previewRoot")) },
-            { QStringLiteral("targetPid"), session.status.value(QStringLiteral("targetPid")) },
-            { QStringLiteral("services"), session.status.value(QStringLiteral("services")) },
-        });
-    }
-    return summaries;
-}
-
-static bool resolveLauncherSession(int timeoutMs, LauncherSession *selected, QString *error,
-                                   const QString &wantedSessionId = QString())
-{
-    QList<LauncherSession> reachable;
-    for (const LauncherSession &session : discoverLauncherSessions(timeoutMs)) {
-        if (!session.status.value(QStringLiteral("controlReachable")).toBool(true))
-            continue;
-        if (!wantedSessionId.isEmpty() && !session.id.startsWith(wantedSessionId))
-            continue;
-        reachable.append(session);
-    }
-    if (reachable.isEmpty()) {
-        if (!wantedSessionId.isEmpty()) {
-            *error = QStringLiteral("No live qmlagent-launcher session matches --session %1. "
-                                    "Run qmlagentctl sessions to list live sessions.")
-                             .arg(wantedSessionId);
-            return false;
-        }
-        *error = QStringLiteral("No live qmlagent-launcher session found.\n\n"
-                                "Start one of these first:\n"
-                                "  qmlagent-launcher preview <Main.qml>\n"
-                                "  qmlagent-launcher app <executable> [-- args...]");
-        return false;
-    }
-    if (reachable.size() > 1) {
-        *error = QStringLiteral("Multiple live qmlagent-launcher sessions found. "
-                                "Pin one by its launcherSession id (qmlagentctl --session <id>, "
-                                "or the MCP tools' session argument). Sessions: %1")
-                         .arg(QString::fromUtf8(QJsonDocument(launcherSessionSummaries(reachable))
-                                                    .toJson(QJsonDocument::Compact)));
-        return false;
-    }
-    *selected = reachable.first();
-    return true;
-}
-
-static QJsonObject stopUnreachableLauncherFallback(const LauncherSession &session)
-{
-    const qint64 launcherPid = session.metadata.value(QStringLiteral("launcherPid")).toInteger(-1);
-    const qint64 targetPid = session.metadata.value(QStringLiteral("targetPid")).toInteger(-1);
-    const bool launcherSignalSent = terminatePid(launcherPid);
-    const bool targetSignalSent = terminatePid(targetPid);
-    for (int i = 0; i < 20 && (processExists(launcherPid) || processExists(targetPid)); ++i)
-        QThread::msleep(50);
-
-    return {
-        { QStringLiteral("action"), QStringLiteral("stop") },
-        { QStringLiteral("ok"), launcherSignalSent || targetSignalSent },
-        { QStringLiteral("mode"), QStringLiteral("process-fallback") },
-        { QStringLiteral("reason"), QStringLiteral("launcher control channel was not reachable") },
-        { QStringLiteral("launcherPid"), launcherPid },
-        { QStringLiteral("targetPid"), targetPid },
-        { QStringLiteral("launcherSignalSent"), launcherSignalSent },
-        { QStringLiteral("targetSignalSent"), targetSignalSent },
-        { QStringLiteral("launcherStillRunning"), processExists(launcherPid) },
-        { QStringLiteral("targetStillRunning"), processExists(targetPid) },
-    };
-}
-
-static bool resolveLauncherSessionForStop(int timeoutMs, LauncherSession *selected,
-                                          QJsonObject *fallbackResult, QString *error,
-                                          const QString &wantedSessionId = QString())
-{
-    QList<LauncherSession> sessions = discoverLauncherSessions(timeoutMs);
-    if (!wantedSessionId.isEmpty()) {
-        QList<LauncherSession> matching;
-        for (const LauncherSession &session : sessions) {
-            if (session.id.startsWith(wantedSessionId))
-                matching.append(session);
-        }
-        sessions = matching;
-    }
-    QList<LauncherSession> reachable;
-    for (const LauncherSession &session : sessions) {
-        if (session.status.value(QStringLiteral("controlReachable")).toBool(true))
-            reachable.append(session);
-    }
-
-    if (reachable.size() == 1) {
-        *selected = reachable.first();
-        return true;
-    }
-    if (reachable.size() > 1) {
-        *error = QStringLiteral("Multiple live qmlagent-launcher sessions found. "
-                                "Pin one with --session <id>. Sessions: %1")
-                         .arg(QString::fromUtf8(QJsonDocument(launcherSessionSummaries(reachable))
-                                                    .toJson(QJsonDocument::Compact)));
-        return false;
-    }
-
-    QList<LauncherSession> processBacked;
-    for (const LauncherSession &session : sessions) {
-        const qint64 launcherPid = session.metadata.value(QStringLiteral("launcherPid")).toInteger(-1);
-        const qint64 targetPid = session.metadata.value(QStringLiteral("targetPid")).toInteger(-1);
-        if (processExists(launcherPid) || processExists(targetPid))
-            processBacked.append(session);
-    }
-    if (processBacked.size() == 1) {
-        *fallbackResult = stopUnreachableLauncherFallback(processBacked.first());
-        return false;
-    }
-
-    if (sessions.isEmpty()) {
-        *error = QStringLiteral("No live qmlagent-launcher session found.\n\n"
-                                "Start one of these first:\n"
-                                "  qmlagent-launcher preview <Main.qml>\n"
-                                "  qmlagent-launcher app <executable> [-- args...]");
-    } else {
-        *error = QStringLiteral("No reachable qmlagent-launcher session found. Sessions: %1")
-                         .arg(QString::fromUtf8(QJsonDocument(launcherSessionSummaries(sessions))
-                                                    .toJson(QJsonDocument::Compact)));
-    }
-    return false;
 }
 
 static void printJsonObject(const QJsonObject &object, const QString &format)
@@ -1162,17 +792,7 @@ static int runCtlSubcommand(const QStringList &arguments)
 
     LauncherSession launcher;
     QString launcherError;
-    QJsonObject stopFallbackResult;
-    if (command == QLatin1String("stop")) {
-        if (!resolveLauncherSessionForStop(timeoutMs, &launcher, &stopFallbackResult,
-                                           &launcherError, wantedSession)) {
-            if (!stopFallbackResult.isEmpty()) {
-                printJsonObject(stopFallbackResult, format);
-                return stopFallbackResult.value(QStringLiteral("ok")).toBool(false) ? 0 : 1;
-            }
-            return fail(launcherError);
-        }
-    } else if (!resolveLauncherSession(timeoutMs, &launcher, &launcherError, wantedSession)) {
+    if (!resolveLauncherSession(timeoutMs, &launcher, &launcherError, wantedSession)) {
         return fail(launcherError);
     }
 
@@ -2457,14 +2077,8 @@ private:
         if (name == QLatin1String("qmlagent_launcher_stop")) {
             LauncherSession launcher;
             QString launcherError;
-            QJsonObject fallbackResult;
-            if (!resolveLauncherSessionForStop(m_timeoutMs, &launcher, &fallbackResult,
-                                               &launcherError)) {
-                if (!fallbackResult.isEmpty()) {
-                    writeMessage(jsonResponse(requestId, toolResult(fallbackResult,
-                            !fallbackResult.value(QStringLiteral("ok")).toBool(false))));
-                    return true;
-                }
+            if (!resolveLauncherSession(m_timeoutMs, &launcher, &launcherError,
+                                        arguments.value(QStringLiteral("session")).toString())) {
                 writeMessage(jsonResponse(requestId, toolErrorResult(launcherError)));
                 return true;
             }

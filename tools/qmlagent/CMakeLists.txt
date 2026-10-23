@@ -11,6 +11,8 @@ set(qmlagent_client_sources
     qmlagentmcpprotocol.h
     qmlagentpaths.cpp
     qmlagentpaths.h
+    qmlagentlauncher.cpp
+    qmlagentlauncher.h
 )
 
 # The Qt lib dir is kept in the install rpath so the tools also run when

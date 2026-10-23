@@ -322,6 +322,12 @@ whenever another session may be live — e.g. an integration-test target
 alongside your app — so that if your target exits the call fails instead of
 silently rerouting to the surviving session.
 
+Sandboxed clients do not need to see the launcher's PID, but they must share
+access to the registry, control mailbox, and reply directory. An inaccessible
+control channel is reported as unreachable without deleting the session's
+registry files. `stop` also requires a reachable launcher; it does not signal
+PIDs read from registry files, which may belong to another PID namespace.
+
 Raw protocol escape hatch:
 
 ```
