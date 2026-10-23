@@ -68,25 +68,72 @@ class CanvasPainterFixtureItem final : public QCanvasPainterItem
 
 public:
     explicit CanvasPainterFixtureItem(QQuickItem *parent = nullptr)
-        : QCanvasPainterItem(parent),
-          m_boxShadow(QRectF(10, 20, 80, 40), 6, 8, QColor(QStringLiteral("#80402010"))),
-          m_linearGradient(QPointF(1, 2), QPointF(30, 40)),
-          m_radialGradient(QPointF(11, 12), 20, 3),
-          m_conicalGradient(QPointF(13, 14), 45),
-          m_boxGradient(QRectF(2, 4, 60, 30), 5, 7),
-          m_imagePattern(m_image, QRectF(3, 6, 24, 18), 15),
-          m_gridPattern(QRectF(4, 5, 12, 14), QColorConstants::Red,
-                        QColorConstants::Transparent, 2, 0.5f, 25),
-          m_baseBrush(m_boxShadow)
+        : QCanvasPainterItem(parent)
     {
+#if QT_VERSION >= QT_VERSION_CHECK(6, 12, 0)
+        m_boxShadow.setRect(QRectF(10, 20, 80, 40));
+        m_boxShadow.setRadius(6);
+        m_boxShadow.setBlur(8);
+        m_boxShadow.setColor(QColor(QStringLiteral("#80402010")));
+
+        m_linearGradient.setStartPosition(QPointF(1, 2));
+        m_linearGradient.setEndPosition(QPointF(30, 40));
+
+        m_radialGradient.setCenterPosition(QPointF(11, 12));
+        m_radialGradient.setInnerRadius(20);
+        m_radialGradient.setOuterRadius(3);
+
+        m_conicalGradient.setCenterPosition(QPointF(13, 14));
+        m_conicalGradient.setStartAngle(45);
+
+        m_boxGradient.setRect(QRectF(2, 4, 60, 30));
+        m_boxGradient.setFeather(5);
+        m_boxGradient.setRadius(7);
+
+        m_imagePattern.setImage(m_image);
+        m_imagePattern.setStartPosition(QPointF(3, 6));
+        m_imagePattern.setImageSize(QSizeF(24, 18));
+        m_imagePattern.setRotation(15);
+
+        m_gridPattern.setStartPosition(QPointF(4, 5));
+        m_gridPattern.setCellSize(QSizeF(12, 14));
+        m_gridPattern.setLineColor(QColorConstants::Red);
+        m_gridPattern.setBackgroundColor(QColorConstants::Transparent);
+        m_gridPattern.setLineWidth(2);
+        m_gridPattern.setFeather(0.5);
+        m_gridPattern.setRotation(25);
+
+        m_customBrush.setAnimationRunning(true);
+#else
+        m_boxShadow = QCanvasBoxShadow(QRectF(10, 20, 80, 40), 6, 8,
+                                       QColor(QStringLiteral("#80402010")));
+
+        m_linearGradient = QCanvasLinearGradient(QPointF(1, 2), QPointF(30, 40));
+
+        m_radialGradient = QCanvasRadialGradient(QPointF(11, 12), 20, 3);
+
+        m_conicalGradient = QCanvasConicalGradient(QPointF(13, 14), 45);
+
+        m_boxGradient = QCanvasBoxGradient(QRectF(2, 4, 60, 30), 5, 7);
+
+        m_imagePattern = QCanvasImagePattern(m_image, QRectF(3, 6, 24, 18), 15);
+
+        m_gridPattern = QCanvasGridPattern(QRectF(4, 5, 12, 14), QColorConstants::Red,
+                                           QColorConstants::Transparent, 2, 0.5f, 25);
+
+        m_customBrush.setTimeRunning(true);
+#endif
         m_boxShadow.setSpread(3);
         m_boxShadow.setTopLeftRadius(2);
+
         m_linearGradient.setColorAt(0.0f, QColorConstants::Red);
         m_linearGradient.setColorAt(1.0f, QColorConstants::Blue);
+
         m_radialGradient.setColorAt(0.0f, QColorConstants::White);
         m_radialGradient.setColorAt(1.0f, QColorConstants::Black);
-        m_customBrush.setTimeRunning(true);
+
         m_offscreenCanvas.setFillColor(QColor(QStringLiteral("#334455")));
+        m_baseBrush = m_boxShadow;
         m_path.moveTo(0, 0);
         for (int i = 1; i <= 39; ++i)
             m_path.lineTo(float(i), float(i * 2));
@@ -745,14 +792,34 @@ void tst_QQmlAgentInput::canvasPainterItemAndValuesAreDiscoverable()
     QCOMPARE(linear.value(QStringLiteral("startPosition")).toObject()
                      .value(QStringLiteral("x")).toDouble(), 1.0);
     QCOMPARE(linear.value(QStringLiteral("stops")).toArray().size(), 2);
-    QVERIFY(properties.value(QStringLiteral("baseGradient")).toObject()
-                    .contains(QStringLiteral("limitations")));
+
+    const QJsonObject conical = properties.value(QStringLiteral("conicalGradient")).toObject();
+    QCOMPARE(conical.value(QStringLiteral("brushType")).toString(),
+             QStringLiteral("conicalGradient"));
+    QCOMPARE(conical.value(QStringLiteral("angle")).toDouble(), 45.0);
+
+    const QJsonObject baseGradient = properties.value(QStringLiteral("baseGradient")).toObject();
+    QCOMPARE(baseGradient.value(QStringLiteral("brushType")).toString(),
+             QStringLiteral("linearGradient"));
+#if QT_VERSION >= QT_VERSION_CHECK(6, 12, 0)
+    // Qt 6.12 keeps the concrete gradient type through the QVariant conversion,
+    // so geometry survives instead of being erased to QCanvasGradient.
+    QCOMPARE(baseGradient.value(QStringLiteral("startPosition")).toObject()
+                     .value(QStringLiteral("x")).toDouble(), 1.0);
+#else
+    QVERIFY(baseGradient.contains(QStringLiteral("limitations")));
+#endif
 
     const QJsonObject image = properties.value(QStringLiteral("image")).toObject();
     QCOMPARE(image.value(QStringLiteral("isNull")).toBool(), true);
     QVERIFY(!image.value(QStringLiteral("limitations")).toArray().isEmpty());
-    QCOMPARE(properties.value(QStringLiteral("gridPattern")).toObject()
-                     .value(QStringLiteral("lineWidth")).toDouble(), 2.0);
+    const QJsonObject imagePattern = properties.value(QStringLiteral("imagePattern")).toObject();
+    QCOMPARE(imagePattern.value(QStringLiteral("brushType")).toString(),
+             QStringLiteral("imagePattern"));
+    const QJsonObject gridPattern = properties.value(QStringLiteral("gridPattern")).toObject();
+    QCOMPARE(gridPattern.value(QStringLiteral("brushType")).toString(),
+             QStringLiteral("gridPattern"));
+    QCOMPARE(gridPattern.value(QStringLiteral("lineWidth")).toDouble(), 2.0);
     QCOMPARE(properties.value(QStringLiteral("customBrush")).toObject()
                      .value(QStringLiteral("timeRunning")).toBool(), true);
     QVERIFY(properties.value(QStringLiteral("offscreenCanvas")).toObject()

@@ -61,6 +61,22 @@ QString brushTypeName(QCanvasBrush::BrushType type)
     return QStringLiteral("unknown");
 }
 
+// Qt 6.12 removed the per-class type() accessors; every brush-like value still
+// converts to QCanvasBrush, which carries the type.
+#if QT_VERSION >= QT_VERSION_CHECK(6, 12, 0)
+template <typename Brush>
+QCanvasBrush::BrushType brushTypeOf(const Brush &brush)
+{
+    return static_cast<QCanvasBrush>(brush).type();
+}
+#else
+template <typename Brush>
+QCanvasBrush::BrushType brushTypeOf(const Brush &brush)
+{
+    return brush.type();
+}
+#endif
+
 QJsonValue colorValue(const QColor &color)
 {
     if (!color.isValid())
@@ -157,7 +173,11 @@ QJsonValue valueFromVariant(const QVariant &value)
         const QCanvasConicalGradient gradient = value.value<QCanvasConicalGradient>();
         QJsonObject result = gradientValue(gradient, QStringLiteral("QCanvasConicalGradient"));
         result.insert(QStringLiteral("centerPosition"), pointValue(gradient.centerPosition()));
+#if QT_VERSION >= QT_VERSION_CHECK(6, 12, 0)
+        result.insert(QStringLiteral("angle"), gradient.startAngle());
+#else
         result.insert(QStringLiteral("angle"), gradient.angle());
+#endif
         return result;
     }
     if (type == QMetaType::fromType<QCanvasBoxGradient>()) {
@@ -181,7 +201,7 @@ QJsonValue valueFromVariant(const QVariant &value)
     if (type == QMetaType::fromType<QCanvasBoxShadow>()) {
         const QCanvasBoxShadow shadow = value.value<QCanvasBoxShadow>();
         QJsonObject result = canvasValue(QStringLiteral("QCanvasBoxShadow"));
-        result.insert(QStringLiteral("brushType"), brushTypeName(shadow.type()));
+        result.insert(QStringLiteral("brushType"), brushTypeName(brushTypeOf(shadow)));
         result.insert(QStringLiteral("rect"), rectValue(shadow.rect()));
         result.insert(QStringLiteral("boundingRect"), rectValue(shadow.boundingRect()));
         result.insert(QStringLiteral("radius"), shadow.radius());
@@ -199,7 +219,7 @@ QJsonValue valueFromVariant(const QVariant &value)
     if (type == QMetaType::fromType<QCanvasImagePattern>()) {
         const QCanvasImagePattern pattern = value.value<QCanvasImagePattern>();
         QJsonObject result = canvasValue(QStringLiteral("QCanvasImagePattern"));
-        result.insert(QStringLiteral("brushType"), brushTypeName(pattern.type()));
+        result.insert(QStringLiteral("brushType"), brushTypeName(brushTypeOf(pattern)));
         result.insert(QStringLiteral("startPosition"), pointValue(pattern.startPosition()));
         result.insert(QStringLiteral("imageSize"), sizeValue(pattern.imageSize()));
         result.insert(QStringLiteral("image"), imageValue(pattern.image()));
@@ -210,7 +230,7 @@ QJsonValue valueFromVariant(const QVariant &value)
     if (type == QMetaType::fromType<QCanvasGridPattern>()) {
         const QCanvasGridPattern pattern = value.value<QCanvasGridPattern>();
         QJsonObject result = canvasValue(QStringLiteral("QCanvasGridPattern"));
-        result.insert(QStringLiteral("brushType"), brushTypeName(pattern.type()));
+        result.insert(QStringLiteral("brushType"), brushTypeName(brushTypeOf(pattern)));
         result.insert(QStringLiteral("startPosition"), pointValue(pattern.startPosition()));
         result.insert(QStringLiteral("cellSize"), sizeValue(pattern.cellSize()));
         result.insert(QStringLiteral("lineWidth"), pattern.lineWidth());
@@ -223,8 +243,12 @@ QJsonValue valueFromVariant(const QVariant &value)
     if (type == QMetaType::fromType<QCanvasCustomBrush>()) {
         const QCanvasCustomBrush brush = value.value<QCanvasCustomBrush>();
         QJsonObject result = canvasValue(QStringLiteral("QCanvasCustomBrush"));
-        result.insert(QStringLiteral("brushType"), brushTypeName(brush.type()));
+        result.insert(QStringLiteral("brushType"), brushTypeName(brushTypeOf(brush)));
+#if QT_VERSION >= QT_VERSION_CHECK(6, 12, 0)
+        result.insert(QStringLiteral("timeRunning"), brush.isAnimationRunning());
+#else
         result.insert(QStringLiteral("timeRunning"), brush.timeRunning());
+#endif
         result.insert(QStringLiteral("limitations"),
                       QJsonArray{
                               QStringLiteral("shader source and custom data are not "
